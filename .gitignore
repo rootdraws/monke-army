@@ -1,0 +1,32 @@
+# Environment / secrets
+.env
+*.env
+!.env.example
+!bot/*.env.example
+
+# Dependencies
+node_modules/
+
+# Anchor / Solana build
+.anchor/
+target/
+test-ledger/
+# Generated program keypairs (contain private keys for program authority)
+target/deploy/*.json
+
+# Bot runtime
+positions-cache.json
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+!.vscode/settings.json
+.idea/
+
+# Build output
+dist/
+build/

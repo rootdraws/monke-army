@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frame</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0d0d0f;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Each corner is independent */
+    .corner {
+      position: fixed;
+      width: 200px;
+      height: 200px;
+      pointer-events: none;
+    }
+
+    .corner svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    /* Top section corners - constrained to upper 61.8% with asymptotic gap */
+    .corner.top-left {
+      top: 10px;
+      left: 10px;
+    }
+
+    .corner.top-right {
+      top: 10px;
+      right: 10px;
+    }
+
+    .corner.bottom-left {
+      bottom: calc(38.2vh + 10px + 10px);
+      left: 10px;
+    }
+
+    .corner.bottom-right {
+      bottom: calc(38.2vh + 10px + 10px);
+      right: 10px;
+    }
+
+    /* Center accents - also independent */
+    .center-accent {
+      position: fixed;
+      pointer-events: none;
+    }
+
+    .center-accent.top {
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .center-accent.bottom {
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    /* Center bottom scaffold circle */
+    .center-scaffold-circle {
+      position: fixed;
+      bottom: 34px;
+      left: calc(36px + (100vw - 72px) * 0.382 + 20px);
+      right: calc(36px + (100vw - 72px) * 0.382 + 20px);
+      height: 0;
+      pointer-events: none;
+    }
+    
+    .center-scaffold-circle svg {
+      position: absolute;
+      width: 100%;
+      left: 0;
+      overflow: visible;
+    }
+
+    
+
+    
+
+    /* Navigation */
+    .nav-arrow {
+      position: fixed;
+      bottom: calc(34px - 28px - 3px);
+      cursor: pointer;
+      opacity: 0.5;
+      transition: opacity 0.3s ease;
+    }
+
+    .nav-arrow:hover {
+      opacity: 1;
+    }
+
+    .nav-arrow.left { left: calc(50% - 19px - 40px); }
+    .nav-arrow.right { right: calc(50% - 19px - 40px); }
+
+    /* Page dots */
+    .page-dots {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #3a3a40;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .dot.active { background: #e8e8ec; }
+    .dot:hover, .dot.hover { background: #6a6a70; }
+
+    /* Slide rule scaffold */
+    .slide-rule {
+      position: fixed;
+      top: 19px;
+      bottom: calc(38.2vh + 29px);
+      right: 38.2vw;
+      width: 1px;
+      border-left: 1px dashed #4a4a50;
+      pointer-events: none;
+    }
+
+
+    /* Slider track area */
+    .slider-track {
+      position: fixed;
+      right: calc(38.2vw + 2px);
+      top: 19px;
+      bottom: calc(38.2vh + 29px);
+      width: 50px;
+      pointer-events: all;
+    }
+
+    /* Thorn slider handle */
+    .slider-handle {
+      position: absolute;
+      left: 0;
+      width: 50px;
+      height: 36px;
+      cursor: ns-resize;
+    }
+
+    .slider-handle:hover .slider-arrow {
+      fill: #7a7a84;
+    }
+
+
+
+    /* Dynamic range panel */
+    .range-panel {
+      position: fixed;
+      pointer-events: none;
+      z-index: 1;
+    }
+    
+    .range-panel svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+
+    .slider-handle svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Sell range sliders - top two */
+    .slider-handle.sell-high { top: 20%; }
+    .slider-handle.sell-low { top: 30%; }
+
+    /* Buy range sliders - bottom two */
+    .slider-handle.buy-high { top: 60%; }
+    .slider-handle.buy-low { top: 70%; }
+
+    /* Positions panel - bottom golden ratio section */
+    .positions-panel {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 38.2vh;
+      pointer-events: none;
+    }
+
+    .positions-panel .panel-corner {
+      position: absolute;
+      width: 120px;
+      height: 120px;
+      pointer-events: none;
+    }
+
+    .positions-panel .panel-corner svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .positions-panel .panel-corner.top-left { top: -1px; left: -12px; }
+    .positions-panel .panel-corner.top-right { top: -1px; right: -12px; }
+    .positions-panel .panel-corner.bottom-left { bottom: -12px; left: -12px; }
+    .positions-panel .panel-corner.bottom-right { bottom: -12px; right: -12px; }
+    
+    /* Inner anchor circles - right tangent aligned to left yellow scaffold */
+    .positions-panel .panel-corner.top-inner-left { 
+      top: -1px; 
+      left: calc(36px + (100vw - 72px) * 0.382 - 20px - 99px); 
+    }
+    .positions-panel .panel-corner.bottom-inner-left { 
+      bottom: -12px; 
+      left: calc(36px + (100vw - 72px) * 0.382 - 20px - 99px); 
+    }
+    
+    /* Inner anchor circles - left tangent aligned to right red scaffold */
+    .positions-panel .panel-corner.top-inner-right { 
+      top: -1px; 
+      right: calc(36px + (100vw - 72px) * 0.382 - 20px - 99px); 
+    }
+    .positions-panel .panel-corner.bottom-inner-right { 
+      bottom: -12px; 
+      right: calc(36px + (100vw - 72px) * 0.382 - 20px - 99px); 
+    }
+
+    .positions-panel .tab {
+      position: absolute;
+      top: 12px;
+      left: 140px;
+      font-family: system-ui, sans-serif;
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #6a6a70;
+      text-transform: uppercase;
+      pointer-events: all;
+      cursor: pointer;
+      transition: color 0.2s ease;
+    }
+
+    .positions-panel .tab:hover {
+      color: #9a9aa2;
+    }
+
+    /* Hover states for interactive circles */
+    .corner.top-left {
+      pointer-events: all;
+    }
+    
+    .corner.top-left svg {
+      pointer-events: none;
+    }
+    
+    .hoverable {
+      pointer-events: all;
+      cursor: pointer;
+      transition: stroke 0.2s ease;
+    }
+    
+    .hoverable:hover {
+      stroke: #8a8a94;
+    }
+
+    /* Arrow hover enhancement */
+    .nav-arrow path {
+      transition: stroke 0.2s ease, fill 0.2s ease;
+    }
+    
+    .nav-arrow:hover path[fill="none"] {
+      stroke: #8a8a94;
+    }
+    
+    .nav-arrow:hover path[fill="#4a4a50"] {
+      fill: #8a8a94;
+    }
+
+    /* Tangent rays scaffold */
+    .tangent-ray {
+      position: fixed;
+      pointer-events: none;
+    }
+    
+    .tangent-ray.top {
+      top: 19px;
+      left: 90px;
+      right: 90px;
+      height: 1px;
+      border-top: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.top-section-bottom {
+      bottom: calc(38.2vh + 10px + 10px + 9px);
+      left: 90px;
+      right: 90px;
+      height: 1px;
+      border-top: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.bottom-section-top-left {
+      bottom: calc(38.2vh - 20px);
+      left: 36px;
+      width: calc((100vw - 72px) * 0.382 - 20px - 99px + 72px);
+      height: 1px;
+      border-top: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.bottom-section-top-right {
+      bottom: calc(38.2vh - 20px);
+      right: 36px;
+      width: calc((100vw - 72px) * 0.382 - 20px - 99px + 72px);
+      height: 1px;
+      border-top: 1px dashed #4a4a50;
+    }
+
+    /* Golden ratio scaffold markers removed */
+    
+    .tangent-ray.left {
+      left: 19px;
+      top: 90px;
+      bottom: calc(38.2vh + 10px + 90px);
+      width: 1px;
+      border-left: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.right {
+      right: 19px;
+      top: 90px;
+      bottom: calc(38.2vh + 10px + 90px);
+      width: 1px;
+      border-left: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.bottom-section-left {
+      left: 9px;
+      bottom: 36px;
+      height: calc(38.2vh - 20px - 36px - 27px);
+      width: 1px;
+      border-left: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.bottom-section-left-inner {
+      left: calc(36px + (100vw - 72px) * 0.382 - 20px);
+      bottom: 36px;
+      height: calc(38.2vh - 20px - 36px - 27px);
+      width: 1px;
+      border-left: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.bottom-section-right-inner {
+      right: calc(36px + (100vw - 72px) * 0.382 - 20px);
+      bottom: 36px;
+      height: calc(38.2vh - 20px - 36px - 27px);
+      width: 1px;
+      border-left: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.bottom-section-right {
+      right: 9px;
+      bottom: 36px;
+      height: calc(38.2vh - 20px - 36px - 27px);
+      width: 1px;
+      border-left: 1px dashed #4a4a50;
+    }
+    
+
+    .tangent-ray.bottom-section-bottom-left {
+      bottom: 9px;
+      left: 36px;
+      width: calc((100vw - 72px) * 0.382 - 20px - 99px + 72px);
+      height: 1px;
+      border-top: 1px dashed #4a4a50;
+    }
+    
+    .tangent-ray.bottom-section-bottom-right {
+      bottom: 9px;
+      right: 36px;
+      width: calc((100vw - 72px) * 0.382 - 20px - 99px + 72px);
+      height: 1px;
+      border-top: 1px dashed #4a4a50;
+    }
+
+    
+
+    
+  </style>
+</head>
+<body>
+
+  <!-- TANGENT RAYS - connecting scaffold circles along outer boundaries -->
+  <div class="tangent-ray top"></div>
+  <div class="tangent-ray top-section-bottom"></div>
+  <div class="tangent-ray bottom-section-top-left"></div>
+  <div class="tangent-ray bottom-section-top-right"></div>
+  <div class="tangent-ray bottom-section-bottom-left"></div>
+  <div class="tangent-ray bottom-section-bottom-right"></div>
+  <div class="tangent-ray left"></div>
+  <div class="tangent-ray right"></div>
+  <div class="tangent-ray bottom-section-left"></div>
+  <div class="tangent-ray bottom-section-left-inner"></div>
+  <div class="tangent-ray bottom-section-right"></div>
+  <div class="tangent-ray bottom-section-right-inner"></div>
+
+
+  <!-- TOP LEFT -->
+  <div class="corner top-left">
+    <svg viewBox="0 0 200 200">
+      <!-- Larger circle - stroke hidden -->
+      <path d="M 11 80 A 70 70 0 1 1 80 11" fill="none" stroke="none"/>
+      
+      <!-- Solid grey fill - top-left quadrant tire -->
+      <path d="M 80 1 A 80 80 0 0 0 1 80 L 11 80 A 70 70 0 0 1 80 11 Z" 
+            fill="#5a5a62"/>
+      
+      <!-- Smaller circle - inside larger, tangent at bottom-right on diagonal -->
+      <circle class="hoverable" cx="98" cy="98" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5"/>
+      
+      <!-- Small circles tangent to INSIDE of scaffold circle (center 83.5,83.5, radius 65) -->
+      <!-- For internal tangent: center = scaffold_center + (scaffold_r - circle_r) * direction -->
+      
+      <!-- At 156deg, r=7, distance 58 from center -->
+      <!-- 83.5 + 58*cos(156°), 83.5 + 58*sin(156°) = 83.5 + 58*(-0.914), 83.5 + 58*(0.407) -->
+      <circle class="hoverable" cx="30.5" cy="107.1" r="7" fill="none" stroke="#4a4a50" stroke-width="1.5"/>
+      
+      <!-- At 188deg, r=8, distance 57 from center -->
+      <circle class="hoverable" cx="27.1" cy="75.6" r="8" fill="none" stroke="#4a4a50" stroke-width="1.5"/>
+      
+      <!-- At 225deg (diagonal), r=10, distance 55 from center -->
+      <!-- 83.5 + 55*cos(225°), 83.5 + 55*sin(225°) -->
+      <circle class="hoverable" cx="44.6" cy="44.6" r="10" fill="none" stroke="#4a4a50" stroke-width="1.5"/>
+      
+      <!-- At 262deg, r=8, distance 57 from center -->
+      <!-- 83.5 + 57*cos(262°), 83.5 + 57*sin(262°) = 83.5 + 57*(-0.139), 83.5 + 57*(-0.990) -->
+      <circle class="hoverable" cx="75.6" cy="27.1" r="8" fill="none" stroke="#4a4a50" stroke-width="1.5"/>
+      
+      <!-- At 294deg, r=7, distance 58 from center -->
+      <!-- 83.5 + 58*cos(294°), 83.5 + 58*sin(294°) = 83.5 + 58*(0.407), 83.5 + 58*(-0.914) -->
+      <circle class="hoverable" cx="107.1" cy="30.5" r="7" fill="none" stroke="#4a4a50" stroke-width="1.5"/>
+
+    </svg>
+  </div>
+
+  <!-- TOP RIGHT -->
+  <div class="corner top-right">
+    <svg viewBox="0 0 200 200">
+      <defs>
+        <linearGradient id="tr-fade-down" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#4a4a50"/>
+          <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="tr-fade-left" x1="100%" y1="0%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#4a4a50"/>
+          <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      
+      <!-- Solid grey fill - top-right quadrant tire -->
+      <path d="M 120 1 A 80 80 0 0 1 199 80 L 189 80 A 70 70 0 0 0 120 11 Z" 
+            fill="#5a5a62"/>
+      
+      <!-- Main curve - stroke hidden, geometry preserved -->
+      <path d="M 120 11 A 70 70 0 0 1 189 80" 
+            fill="none" stroke="none"/>
+      
+      <!-- Extending needles -->
+      <line x1="190" y1="80" x2="190" y2="300" stroke="url(#tr-fade-down)" stroke-width="1"/>
+      <line x1="120" y1="10" x2="-100" y2="10" stroke="url(#tr-fade-left)" stroke-width="1"/>
+      
+    </svg>
+  </div>
+
+  <!-- BOTTOM LEFT -->
+  <div class="corner bottom-left">
+    <svg viewBox="0 0 200 200">
+      <defs>
+        <linearGradient id="bl-fade-up" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#4a4a50"/>
+          <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="bl-fade-right" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#4a4a50"/>
+          <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      
+      <!-- Solid grey fill - bottom-left quadrant tire -->
+      <path d="M 1 119 A 80 80 0 0 0 80 199 L 80 189 A 70 70 0 0 1 11 119 Z" 
+            fill="#5a5a62"/>
+      
+      <!-- Extending needles -->
+      <line x1="10" y1="120" x2="10" y2="-100" stroke="url(#bl-fade-up)" stroke-width="1"/>
+      <line x1="80" y1="190" x2="350" y2="190" stroke="url(#bl-fade-right)" stroke-width="1"/>
+      
+    </svg>
+  </div>
+
+  <!-- BOTTOM RIGHT -->
+  <div class="corner bottom-right">
+    <svg viewBox="0 0 200 200">
+      <defs>
+        <linearGradient id="br-fade-up" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#4a4a50"/>
+          <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="br-fade-left" x1="100%" y1="0%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#4a4a50"/>
+          <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      
+      <!-- Solid grey fill - bottom-right quadrant tire -->
+      <path d="M 199 119 A 80 80 0 0 1 120 199 L 120 189 A 70 70 0 0 0 189 119 Z" 
+            fill="#5a5a62"/>
+      
+      <!-- Main curve - tangent to scaffold circle, along outer edge (stroke hidden) -->
+      <path d="M 190 120 A 70 70 0 0 1 120 190" 
+            fill="none" stroke="none"/>
+      
+      <!-- Extending needles -->
+      <line x1="190" y1="120" x2="190" y2="-100" stroke="url(#br-fade-up)" stroke-width="1"/>
+      <line x1="120" y1="190" x2="-150" y2="190" stroke="url(#br-fade-left)" stroke-width="1"/>
+      
+    </svg>
+  </div>
+
+
+
+  <!-- CENTER BOTTOM -->
+  <div class="center-accent bottom">
+    <svg width="20" height="60" viewBox="0 0 20 60">
+      <line x1="10" y1="60" x2="10" y2="15" stroke="#4a4a50" stroke-width="1"/>
+      <circle cx="10" cy="8" r="3" fill="none" stroke="#4a4a50" stroke-width="1"/>
+      <circle cx="10" cy="8" r="1" fill="#4a4a50"/>
+    </svg>
+  </div>
+
+  <!-- CENTER BOTTOM SCAFFOLD CIRCLE -->
+  <div class="center-scaffold-circle">
+    <svg viewBox="0 0 100 150" preserveAspectRatio="none">
+      <ellipse cx="50" cy="0" rx="50" ry="50" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+      <!-- Inner circle tangent at top (inside) -->
+      <ellipse cx="50" cy="-10" rx="40" ry="40" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+      <!-- Third circle, same center as nav, tangent to inside of inner circle -->
+      <ellipse cx="50" cy="0" rx="30" ry="30" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+    </svg>
+  </div>
+  
+
+  <!-- LEFT ARROW -->
+  <div class="nav-arrow left">
+    <svg width="40" height="56" viewBox="0 0 40 56">
+      <path d="M 18 28 Q 24 26, 34 18 Q 28 28, 34 38 Q 24 30, 18 28 Z" fill="#4a4a50" stroke="none"/>
+    </svg>
+  </div>
+
+  <!-- RIGHT ARROW -->
+  <div class="nav-arrow right">
+    <svg width="40" height="56" viewBox="0 0 40 56">
+      <path d="M 22 28 Q 16 26, 6 18 Q 12 28, 6 38 Q 16 30, 22 28 Z" fill="#4a4a50" stroke="none"/>
+    </svg>
+  </div>
+
+  
+
+  <!-- POSITIONS PANEL - bottom golden ratio section with own corner anchors -->
+  <div class="positions-panel">
+    
+    <!-- Top left corner - same structure as main frame corners -->
+    <div class="panel-corner top-left">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-tl-fade-down" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-tl-fade-right" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle -->
+        <path d="M 80 35 A 45 45 0 0 0 35 80" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle - same size as inner crescent -->
+        <circle cx="80" cy="80" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="35" y1="80" x2="35" y2="300" stroke="url(#pp-tl-fade-down)" stroke-width="1"/>
+        <line x1="80" y1="35" x2="350" y2="35" stroke="url(#pp-tl-fade-right)" stroke-width="1"/>
+      </svg>
+    </div>
+    
+    <!-- Top right corner -->
+    <div class="panel-corner top-right">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-tr-fade-down" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-tr-fade-left" x1="100%" y1="0%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle -->
+        <path d="M 120 35 A 45 45 0 0 1 165 80" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle - same size as inner crescent -->
+        <circle cx="120" cy="80" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="165" y1="80" x2="165" y2="300" stroke="url(#pp-tr-fade-down)" stroke-width="1"/>
+        <line x1="120" y1="35" x2="-100" y2="35" stroke="url(#pp-tr-fade-left)" stroke-width="1"/>
+      </svg>
+    </div>
+    
+    <!-- Bottom left corner -->
+    <div class="panel-corner bottom-left">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-bl-fade-up" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-bl-fade-right" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle -->
+        <path d="M 35 120 A 45 45 0 0 0 80 165" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle - same size as inner crescent -->
+        <circle cx="80" cy="120" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="35" y1="120" x2="35" y2="-100" stroke="url(#pp-bl-fade-up)" stroke-width="1"/>
+        <line x1="80" y1="165" x2="350" y2="165" stroke="url(#pp-bl-fade-right)" stroke-width="1"/>
+      </svg>
+    </div>
+    
+    <!-- Bottom right corner -->
+    <div class="panel-corner bottom-right">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-br-fade-up" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-br-fade-left" x1="100%" y1="0%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle, along outer edge -->
+        <path d="M 165 120 A 45 45 0 0 1 120 165" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle - same size as inner crescent -->
+        <circle cx="120" cy="120" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="165" y1="120" x2="165" y2="-100" stroke="url(#pp-br-fade-up)" stroke-width="1"/>
+        <line x1="120" y1="165" x2="-150" y2="165" stroke="url(#pp-br-fade-left)" stroke-width="1"/>
+      </svg>
+    </div>
+    
+    <!-- Inner top anchor (mirrored from top-right) -->
+    <div class="panel-corner top-inner-left">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-til-fade-down" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-til-fade-left" x1="100%" y1="0%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle -->
+        <path d="M 120 35 A 45 45 0 0 1 165 80" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle -->
+        <circle cx="120" cy="80" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="165" y1="80" x2="165" y2="300" stroke="url(#pp-til-fade-down)" stroke-width="1"/>
+        <line x1="120" y1="35" x2="-100" y2="35" stroke="url(#pp-til-fade-left)" stroke-width="1"/>
+      </svg>
+    </div>
+    
+    <!-- Inner bottom anchor (mirrored from bottom-right) -->
+    <div class="panel-corner bottom-inner-left">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-bil-fade-up" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-bil-fade-left" x1="100%" y1="0%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle -->
+        <path d="M 165 120 A 45 45 0 0 1 120 165" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle -->
+        <circle cx="120" cy="120" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="165" y1="120" x2="165" y2="-100" stroke="url(#pp-bil-fade-up)" stroke-width="1"/>
+        <line x1="120" y1="165" x2="-150" y2="165" stroke="url(#pp-bil-fade-left)" stroke-width="1"/>
+      </svg>
+    </div>
+    
+    <!-- Inner top anchor right (copied from top-left) -->
+    <div class="panel-corner top-inner-right">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-tir-fade-down" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-tir-fade-right" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle -->
+        <path d="M 80 35 A 45 45 0 0 0 35 80" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle -->
+        <circle cx="80" cy="80" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="35" y1="80" x2="35" y2="300" stroke="url(#pp-tir-fade-down)" stroke-width="1"/>
+        <line x1="80" y1="35" x2="350" y2="35" stroke="url(#pp-tir-fade-right)" stroke-width="1"/>
+      </svg>
+    </div>
+    
+    <!-- Inner bottom anchor right (copied from bottom-left) -->
+    <div class="panel-corner bottom-inner-right">
+      <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="pp-bir-fade-up" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="pp-bir-fade-right" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#4a4a50"/>
+            <stop offset="100%" stop-color="#4a4a50" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- Main curve - tangent to scaffold circle -->
+        <path d="M 35 120 A 45 45 0 0 0 80 165" 
+              fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Scaffold circle -->
+        <circle cx="80" cy="120" r="45" fill="none" stroke="#4a4a50" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="35" y1="120" x2="35" y2="-100" stroke="url(#pp-bir-fade-up)" stroke-width="1"/>
+        <line x1="80" y1="165" x2="350" y2="165" stroke="url(#pp-bir-fade-right)" stroke-width="1"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- DYNAMIC RANGE PANEL - between sell-high and sell-low -->
+  <div class="range-panel" id="sell-range-panel">
+    <svg id="sell-range-svg">
+      <path id="sell-range-path" fill="none" stroke="#525258" stroke-width="1.5"/>
+    </svg>
+  </div>
+
+  <!-- DYNAMIC RANGE PANEL - between buy-high and buy-low -->
+  <div class="range-panel" id="buy-range-panel">
+    <svg id="buy-range-svg">
+      <path id="buy-range-path" fill="none" stroke="#525258" stroke-width="1.5"/>
+    </svg>
+  </div>
+
+  <!-- SLIDE RULE WITH THORN SLIDERS -->
+  <div class="slide-rule"></div>
+  <div class="slider-track">
+    <!-- Sell High -->
+    <div class="slider-handle sell-high">
+      <svg viewBox="0 0 50 36">
+        <path d="M 14 0 A 50 50 0 0 1 50 8 L 50 0 Z" fill="none" stroke="none"/>
+        <!-- Arrow flipped, tip at y=0 -->
+        <path class="slider-arrow" d="M 34 0 Q 40 2, 50 10 Q 44 0, 50 -10 Q 40 -2, 34 0 Z" fill="#525258" stroke="none"/>
+      </svg>
+    </div>
+    
+    <!-- Sell Low -->
+    <div class="slider-handle sell-low">
+      <svg viewBox="0 0 50 36">
+        <path d="M 50 28 A 50 50 0 0 1 14 36 L 50 36 Z" fill="none" stroke="none"/>
+        <!-- Arrow -->
+        <path class="slider-arrow" d="M 34 36 Q 40 34, 50 26 Q 44 36, 50 46 Q 40 38, 34 36 Z" fill="#525258" stroke="none"/>
+      </svg>
+    </div>
+    
+    <!-- Buy High -->
+    <div class="slider-handle buy-high">
+      <svg viewBox="0 0 50 36">
+        <path d="M 14 0 A 50 50 0 0 1 50 8 L 50 0 Z" fill="none" stroke="none"/>
+        <!-- Arrow flipped, tip at y=0 -->
+        <path class="slider-arrow" d="M 34 0 Q 40 2, 50 10 Q 44 0, 50 -10 Q 40 -2, 34 0 Z" fill="#525258" stroke="none"/>
+      </svg>
+    </div>
+    
+    <!-- Buy Low -->
+    <div class="slider-handle buy-low">
+      <svg viewBox="0 0 50 36">
+        <path d="M 50 28 A 50 50 0 0 1 14 36 L 50 36 Z" fill="none" stroke="none"/>
+        <!-- Arrow -->
+        <path class="slider-arrow" d="M 34 36 Q 40 34, 50 26 Q 44 36, 50 46 Q 40 38, 34 36 Z" fill="#525258" stroke="none"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- PAGE DOTS -->
+  <div class="page-dots">
+    <div class="dot"></div>
+    <div class="dot active"></div>
+    <div class="dot"></div>
+  </div>
+
+  <script>
+    const topYellow = document.querySelector('.tangent-ray.top');
+    const bottomYellow = document.querySelector('.tangent-ray.top-section-bottom');
+    const rightTangent = document.querySelector('.tangent-ray.right');
+    const bottomRightCorner = document.querySelector('.corner.bottom-right');
+    const topRightCorner = document.querySelector('.corner.top-right');
+    
+    const sliders = document.querySelectorAll('.slider-handle');
+    
+    // Named slider references
+    const sliderRefs = {
+      'sell-high': document.querySelector('.slider-handle.sell-high'),
+      'sell-low': document.querySelector('.slider-handle.sell-low'),
+      'buy-high': document.querySelector('.slider-handle.buy-high'),
+      'buy-low': document.querySelector('.slider-handle.buy-low')
+    };
+    
+    // Range panel elements
+    const buyRangePanel = document.getElementById('buy-range-panel');
+    const buyRangePath = document.getElementById('buy-range-path');
+    const buyRangeSvg = document.getElementById('buy-range-svg');
+    const sellRangePanel = document.getElementById('sell-range-panel');
+    const sellRangePath = document.getElementById('sell-range-path');
+    const sellRangeSvg = document.getElementById('sell-range-svg');
+    
+    // Arc params
+    const ARC_RADIUS = 70;
+    const ARC_CENTER_LOCAL_BR = { x: 120, y: 120 };
+    const ARC_CENTER_LOCAL_TR = { x: 120, y: 80 };
+    
+    function updateRangePanels() {
+      const sellHigh = sliderRefs['sell-high'].getBoundingClientRect();
+      const sellLow = sliderRefs['sell-low'].getBoundingClientRect();
+      const buyHigh = sliderRefs['buy-high'].getBoundingClientRect();
+      const buyLow = sliderRefs['buy-low'].getBoundingClientRect();
+      const slideRule = document.querySelector('.slide-rule').getBoundingClientRect();
+      const bottomCornerRect = bottomRightCorner.getBoundingClientRect();
+      const topCornerRect = topRightCorner.getBoundingClientRect();
+      const rightTangentRect = rightTangent.getBoundingClientRect();
+      
+      const rightEdge = window.innerWidth;
+      const left = slideRule.left;
+      const rightTangentX = rightTangentRect.left;
+      
+      // Sell panel
+      updatePanel(
+        sellRangePanel, sellRangeSvg, sellRangePath,
+        sellHigh.top, sellLow.bottom, left, rightEdge,
+        topCornerRect, ARC_CENTER_LOCAL_TR, rightTangentX, 'top'
+      );
+      
+      // Buy panel
+      updatePanel(
+        buyRangePanel, buyRangeSvg, buyRangePath,
+        buyHigh.top, buyLow.bottom, left, rightEdge,
+        bottomCornerRect, ARC_CENTER_LOCAL_BR, rightTangentX, 'bottom'
+      );
+    }
+    
+    function updatePanel(panel, svg, path, top, bottom, left, rightEdge, cornerRect, arcCenterLocal, rightTangentX, arcPosition) {
+      // Adjustments: left +1px inward, top/bottom/right +1px outward
+      const adjTop = top - 1;
+      const adjBottom = bottom + 1;
+      const adjRightTangent = rightTangentX + 1;
+      const leftInset = 1; // left wall shifts 1px right
+      
+      panel.style.left = left + 'px';
+      panel.style.top = adjTop + 'px';
+      panel.style.width = (rightEdge - left + 1) + 'px';
+      panel.style.height = (adjBottom - adjTop) + 'px';
+      
+      svg.setAttribute('width', rightEdge - left + 1);
+      svg.setAttribute('height', adjBottom - adjTop);
+      svg.setAttribute('viewBox', `0 0 ${rightEdge - left + 1} ${adjBottom - adjTop}`);
+      
+      const scale = cornerRect.width / 200;
+      const arcCenterScreen = {
+        x: cornerRect.left + arcCenterLocal.x * scale,
+        y: cornerRect.top + arcCenterLocal.y * scale
+      };
+      const arcRadiusScreen = ARC_RADIUS * scale + 1; // expand curve 1px
+      
+      const panelHeight = adjBottom - adjTop;
+      
+      let pathD = `M ${leftInset} 0`;
+      const rightAtTop = getRightBoundary(adjTop, arcCenterScreen, arcRadiusScreen, adjRightTangent, arcPosition);
+      pathD += ` L ${rightAtTop - left} 0`;
+      
+      const steps = 32;
+      for (let i = 1; i <= steps; i++) {
+        const screenY = adjTop + (adjBottom - adjTop) * (i / steps);
+        const rightX = getRightBoundary(screenY, arcCenterScreen, arcRadiusScreen, adjRightTangent, arcPosition);
+        const panelX = rightX - left;
+        const panelY = screenY - adjTop;
+        pathD += ` L ${panelX} ${panelY}`;
+      }
+      
+      pathD += ` L ${leftInset} ${panelHeight} Z`;
+      path.setAttribute('d', pathD);
+    }
+    
+    function getRightBoundary(screenY, arcCenter, arcRadius, tangentX, arcPosition) {
+      const dy = screenY - arcCenter.y;
+      
+      if (arcPosition === 'bottom') {
+        if (dy > 0) {
+          if (dy < arcRadius) {
+            const dx = Math.sqrt(arcRadius * arcRadius - dy * dy);
+            return Math.min(arcCenter.x + dx, tangentX);
+          } else {
+            return Math.min(arcCenter.x, tangentX);
+          }
+        }
+      } else if (arcPosition === 'top') {
+        if (dy < 0) {
+          if (Math.abs(dy) < arcRadius) {
+            const dx = Math.sqrt(arcRadius * arcRadius - dy * dy);
+            return Math.min(arcCenter.x + dx, tangentX);
+          } else {
+            return Math.min(arcCenter.x, tangentX);
+          }
+        }
+      }
+      
+      return tangentX;
+    }
+    
+    function updateAll() {
+      updateRangePanels();
+    }
+    
+    updateAll();
+    window.addEventListener('resize', updateAll);
+    
+    // Drag handling
+    const sliderOrder = ['sell-high', 'sell-low', 'buy-high', 'buy-low'];
+    const SLIDER_HEIGHT = 36;
+    
+    let activeSlider = null;
+    let activeSliderName = null;
+    
+    sliders.forEach(slider => {
+      const name = slider.classList[1];
+      
+      slider.addEventListener('mousedown', (e) => {
+        activeSlider = slider;
+        activeSliderName = name;
+        e.preventDefault();
+      });
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!activeSlider) return;
+      
+      const trackTop = topYellow.getBoundingClientRect().top;
+      const trackBottom = bottomYellow.getBoundingClientRect().top;
+      
+      const idx = sliderOrder.indexOf(activeSliderName);
+      
+      let minTop = trackTop;
+      if (idx > 0) {
+        const aboveSlider = sliderRefs[sliderOrder[idx - 1]];
+        const aboveBottom = aboveSlider.getBoundingClientRect().bottom;
+        minTop = Math.max(minTop, aboveBottom);
+      }
+      
+      let maxBottom = trackBottom;
+      if (idx < sliderOrder.length - 1) {
+        const belowSlider = sliderRefs[sliderOrder[idx + 1]];
+        const belowTop = belowSlider.getBoundingClientRect().top;
+        maxBottom = Math.min(maxBottom, belowTop);
+      }
+      
+      let sliderTop = e.clientY - SLIDER_HEIGHT / 2;
+      sliderTop = Math.max(minTop, sliderTop);
+      sliderTop = Math.min(maxBottom - SLIDER_HEIGHT, sliderTop);
+      
+      activeSlider.style.top = (sliderTop - trackTop) + 'px';
+      
+      updateAll();
+    });
+    
+    document.addEventListener('mouseup', () => {
+      activeSlider = null;
+      activeSliderName = null;
+    });
+
+    // Arrow-dot hover connection
+    const leftArrow = document.querySelector('.nav-arrow.left');
+    const rightArrow = document.querySelector('.nav-arrow.right');
+    const dots = document.querySelectorAll('.dot');
+    const leftDot = dots[0];
+    const rightDot = dots[2];
+
+    leftArrow.addEventListener('mouseenter', () => leftDot.classList.add('hover'));
+    leftArrow.addEventListener('mouseleave', () => leftDot.classList.remove('hover'));
+    rightArrow.addEventListener('mouseenter', () => rightDot.classList.add('hover'));
+    rightArrow.addEventListener('mouseleave', () => rightDot.classList.remove('hover'));
+  </script>
+</body>
+</html>

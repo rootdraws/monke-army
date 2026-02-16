@@ -1,0 +1,20 @@
+[workspace]
+members = [
+    "programs/bin-farm",
+    "programs/monke-bananas",
+]
+resolver = "2"
+
+# Pin blake3 to version compatible with Solana SDK's bundled Rust 1.84
+# blake3 >= 1.8.3 requires edition2024 (Rust 1.85+)
+[workspace.dependencies]
+blake3 = "=1.5.5"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+[profile.release.build-override]
+opt-level = 3
+incremental = false

@@ -1,0 +1,40 @@
+{
+  "name": "monke-army",
+  "version": "0.1.0",
+  "description": "Managed Meteora DLMM positions with automated bin harvesting and SMB Gen2 monke revenue sharing on Solana.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:frontend": "node scripts/build-frontend.mjs",
+    "bot": "node bot/monitor.js",
+    "bot:dev": "node --watch bot/monitor.js"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.30.0",
+    "@meteora-ag/alpha-vault": "^1.1.15",
+    "@meteora-ag/dlmm": "^1.3.0",
+    "@solana/spl-token": "^0.4.0",
+    "@solana/wallet-adapter-base": "^0.9.23",
+    "@solana/wallet-adapter-phantom": "^0.9.24",
+    "@solana/wallet-adapter-react": "^0.15.35",
+    "@solana/wallet-adapter-react-ui": "^0.9.35",
+    "@solana/web3.js": "^1.95.0",
+    "@triton-one/yellowstone-grpc": "^5.0.2",
+    "@types/pino": "^7.0.4",
+    "bn.js": "^5.2.1",
+    "dotenv": "^17.3.1",
+    "pino": "^10.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.2",
+    "esbuild": "^0.24.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vite": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
