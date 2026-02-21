@@ -10,9 +10,10 @@
   "SMB_GEN3_COLLECTION": "8Rt3Ayqth4DAiPnW9MDFi63TiQJHmohfTWLMQFHi4KZH",
   "ALPHA_VAULT_ADDRESS": "3Xv442KEA3kkAAaRbPH9YPt3XCsJ8EjjZisGjvgksXd5",
   "DEPOSIT_OPENS_AT": 1771221600,
+  "ACTIVATION_POINT": 1772323200,
   "BIRDEYE_API_KEY": "",
   "DEFAULT_POOL": "",
-  "HELIUS_RPC_URL": "",
+  "HELIUS_RPC_URL": "https://mainnet.helius-rpc.com/?api-key=3ed2a463-fd75-4c6b-921c-6b0d67f43aa1",
   "BOT_RELAY_URL": "ws://localhost:8080",
   "DEBUG": false
 }

@@ -17,9 +17,9 @@
 const CONFIG = {
   RPC_URL: 'https://api.mainnet-beta.solana.com',
   FEE_BPS: 30,
-  CORE_PROGRAM_ID: 'BINFARM1111111111111111111111111111111111111',
-  MONKE_BANANAS_PROGRAM_ID: 'TBD',
-  BANANAS_MINT: '',
+  CORE_PROGRAM_ID: '8FJyoK7UKhYB8qd8187oVWFngQ5ZoVPbNWXSUeZSdgia',
+  MONKE_BANANAS_PROGRAM_ID: 'myA2F4S7trnQUiksrrB1prR3k95d8znEXZXwHkZw5ZH',
+  BANANAS_MINT: 'ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w',
   SMB_COLLECTION: 'SMBtHCCC6RYRutFEPb4gZqeBLUZbMNhRKaMKZZLHi7W',
   BIRDEYE_API_KEY: '',
   DEFAULT_POOL: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
@@ -116,6 +116,8 @@ function handleRelayEvent(msg) {
         state.activeBin = msg.data.newActiveId;
         const priceEl = document.getElementById('currentPrice');
         if (priceEl) priceEl.textContent = '$' + formatPrice(newPrice);
+        vizState.activeBin = msg.data.newActiveId;
+        renderBinViz();
       }
       break;
 
@@ -309,8 +311,8 @@ const state = {
   activeBin: null,
   binStep: 10,
   currentPrice: null,
-  tokenXSymbol: 'SOL',
-  tokenYSymbol: 'TOKEN',
+  tokenXSymbol: 'TOKEN',
+  tokenYSymbol: 'SOL',
 
   // Side
   side: 'buy',
@@ -363,7 +365,7 @@ function updateSide(newSide) {
   }
 
   const tok = document.getElementById('amountToken');
-  if (tok) tok.textContent = newSide === 'buy' ? state.tokenXSymbol : state.tokenYSymbol;
+  if (tok) tok.textContent = newSide === 'buy' ? state.tokenYSymbol : state.tokenXSymbol;
 
   // Update range suffix text and default values
   const suffix = newSide === 'buy' ? '% below' : '% above';
@@ -374,15 +376,85 @@ function updateSide(newSide) {
 
   const nearInput = document.getElementById('rangeNear');
   const farInput = document.getElementById('rangeFar');
-  if (nearInput) nearInput.value = newSide === 'buy' ? '5' : '10';
-  if (farInput) farInput.value = newSide === 'buy' ? '50' : '200';
+  if (nearInput) nearInput.value = newSide === 'buy' ? '0.5' : '0.5';
+  if (farInput) farInput.value = newSide === 'buy' ? '7' : '7';
 
   updateFee();
+  updateBinStrip();
 }
 
-function updateFee() {
+async function updateFee() {
   const el = document.getElementById('feeAmount');
-  if (el) el.textContent = `${CONFIG.FEE_BPS / 100}% on output`;
+  if (!el) return;
+
+  if (!state.connected || !state.connection || !state.publicKey) {
+    el.textContent = `${CONFIG.FEE_BPS / 100}% on output`;
+    return;
+  }
+
+  try {
+    let balanceStr;
+    if (state.side === 'buy') {
+      const lamports = await state.connection.getBalance(state.publicKey);
+      balanceStr = (lamports / 1e9).toFixed(4) + ' ' + (state.tokenYSymbol || 'SOL');
+    } else if (state.tokenXMint) {
+      const mintPk = new solanaWeb3.PublicKey(state.tokenXMint);
+      const atas = await state.connection.getTokenAccountsByOwner(state.publicKey, { mint: mintPk });
+      let total = 0;
+      for (const { account } of atas.value) {
+        total += Number(account.data.readBigUInt64LE(64));
+      }
+      const symbol = state.tokenXSymbol || 'TOKEN';
+      balanceStr = (total / 1e9).toFixed(4) + ' ' + symbol;
+    } else {
+      el.textContent = `${CONFIG.FEE_BPS / 100}% on output`;
+      return;
+    }
+    el.textContent = `balance: ${balanceStr}`;
+  } catch {
+    el.textContent = `${CONFIG.FEE_BPS / 100}% on output`;
+  }
+}
+
+function updateBinStrip() {
+  if (!state.currentPrice || !state.activeBin) return;
+
+  const near = parseFloat(document.getElementById('rangeNear')?.value) || 0;
+  const far = parseFloat(document.getElementById('rangeFar')?.value) || 0;
+
+  const rangeEl = document.getElementById('binStripRange');
+  const activeEl = document.getElementById('binStripActive');
+  const nearLabel = document.getElementById('binStripNear');
+  const farLabel = document.getElementById('binStripFar');
+  const currentLabel = document.getElementById('binStripCurrent');
+  if (!rangeEl || !activeEl) return;
+
+  const maxPct = Math.max(far, near) * 1.3;
+  if (maxPct <= 0) return;
+
+  if (state.side === 'buy') {
+    const rangeLeft = (1 - far / maxPct) * 100;
+    const rangeWidth = ((far - near) / maxPct) * 100;
+    const activePos = (1 - 0 / maxPct) * 100;
+    rangeEl.style.left = rangeLeft + '%';
+    rangeEl.style.width = Math.max(rangeWidth, 1) + '%';
+    rangeEl.style.background = 'var(--mint-faint)';
+    activeEl.style.left = Math.min(activePos, 99) + '%';
+    if (nearLabel) nearLabel.textContent = '-' + near + '%';
+    if (farLabel) farLabel.textContent = '-' + far + '%';
+  } else {
+    const rangeLeft = (near / maxPct) * 100;
+    const rangeWidth = ((far - near) / maxPct) * 100;
+    const activePos = 0;
+    rangeEl.style.left = rangeLeft + '%';
+    rangeEl.style.width = Math.max(rangeWidth, 1) + '%';
+    rangeEl.style.background = 'var(--sell-faint)';
+    activeEl.style.left = activePos + '%';
+    if (nearLabel) nearLabel.textContent = '+' + near + '%';
+    if (farLabel) farLabel.textContent = '+' + far + '%';
+  }
+
+  if (currentLabel) currentLabel.textContent = '$' + formatPrice(state.currentPrice);
 }
 
 // ============================================================
@@ -470,7 +542,13 @@ async function connectWallet(walletId) {
     state.walletName = walletId;
     state.publicKey = pubkey;
     state.connected = true;
-    state.connection = new solanaWeb3.Connection(CONFIG.RPC_URL, 'confirmed');
+    state.connection = new solanaWeb3.Connection(
+      CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL, 'confirmed'
+    );
+
+    // Bridge wallet state for enlist.js and other bundled modules
+    window.__monkeWallet = { publicKey: pubkey, adapter: provider };
+    window.dispatchEvent(new Event('monke:walletChanged'));
 
     await loadOnChainFeeBps();
 
@@ -483,6 +561,8 @@ async function connectWallet(walletId) {
     showToast(`Connected via ${w.name}`, 'success');
     updatePositionsList();
     renderMonkeList();
+    updateEnlistBalance();
+    updateFee();
   } catch (err) {
     console.error('Wallet connection failed:', err);
     if (btn) btn.textContent = 'connect wallet';
@@ -500,6 +580,10 @@ async function disconnectWallet() {
   state.wallet = null;
   state.walletName = null;
 
+  // Clear wallet bridge
+  window.__monkeWallet = null;
+  window.dispatchEvent(new Event('monke:walletChanged'));
+
   const btn = document.getElementById('connectWallet');
   if (btn) {
     btn.textContent = 'connect wallet';
@@ -508,6 +592,8 @@ async function disconnectWallet() {
   showToast('Disconnected');
   updatePositionsList();
   renderMonkeList();
+  const p1Wrap = document.getElementById('enlistPhase1BalanceWrap');
+  if (p1Wrap) p1Wrap.style.display = 'none';
 }
 
 document.addEventListener('click', e => {
@@ -522,19 +608,87 @@ document.addEventListener('click', e => {
 // POOL LOADING
 // ============================================================
 
-// Known pools and featured pools removed — live data from bot relay
+const LBPAIR_EXPECTED_SIZE = 904;
+const LBPAIR_OFFSETS = {
+  ACTIVE_ID: 76,       // i32
+  BIN_STEP: 80,        // u16
+  TOKEN_X_MINT: 88,    // pubkey (32 bytes)
+  TOKEN_Y_MINT: 120,   // pubkey (32 bytes)
+};
+
+const KNOWN_TOKENS = {
+  'So11111111111111111111111111111111111111112': 'SOL',
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
+  'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL',
+  'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': 'jitoSOL',
+  'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 'BONK',
+  'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 'JUP',
+  'ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w': 'BANANAS',
+};
+
+async function parseLbPair(address) {
+  const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
+  const pubkey = new solanaWeb3.PublicKey(address);
+
+  const conn = state.connection || new solanaWeb3.Connection(rpcUrl, 'confirmed');
+  const accountInfo = await conn.getAccountInfo(pubkey);
+
+  if (!accountInfo) throw new Error('Account not found — check the address');
+  if (accountInfo.data.length !== LBPAIR_EXPECTED_SIZE) {
+    throw new Error(`Not a DLMM pool (expected ${LBPAIR_EXPECTED_SIZE} bytes, got ${accountInfo.data.length})`);
+  }
+
+  const data = accountInfo.data;
+  const activeId = data.readInt32LE(LBPAIR_OFFSETS.ACTIVE_ID);
+  const binStep = data.readUInt16LE(LBPAIR_OFFSETS.BIN_STEP);
+
+  if (binStep === 0 || binStep > 500) {
+    throw new Error(`Invalid bin_step ${binStep} — account may not be an LbPair`);
+  }
+
+  const tokenXMint = new solanaWeb3.PublicKey(data.slice(LBPAIR_OFFSETS.TOKEN_X_MINT, LBPAIR_OFFSETS.TOKEN_X_MINT + 32));
+  const tokenYMint = new solanaWeb3.PublicKey(data.slice(LBPAIR_OFFSETS.TOKEN_Y_MINT, LBPAIR_OFFSETS.TOKEN_Y_MINT + 32));
+
+  return { activeId, binStep, tokenXMint, tokenYMint };
+}
+
+async function resolveTokenSymbol(mintPubkey) {
+  const addr = mintPubkey.toBase58();
+  if (KNOWN_TOKENS[addr]) return KNOWN_TOKENS[addr];
+
+  try {
+    const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
+    const resp = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1,
+        method: 'getAsset',
+        params: { id: addr },
+      }),
+    });
+    const json = await resp.json();
+    const symbol = json?.result?.content?.metadata?.symbol;
+    if (symbol) {
+      KNOWN_TOKENS[addr] = symbol;
+      return symbol;
+    }
+  } catch {}
+
+  return addr.slice(0, 4) + '...' + addr.slice(-4);
+}
 
 async function loadPool() {
   const addr = document.getElementById('poolAddress')?.value.trim();
-  if (!addr) { showToast('Enter a pool address', 'error'); return; }
+  if (!addr) { showToast('Enter a DLMM pool address', 'error'); return; }
 
   const btn = document.getElementById('loadPool');
   if (btn) { btn.textContent = 'loading...'; btn.disabled = true; }
 
   try {
-    // Validate as real Solana address
     try { new solanaWeb3.PublicKey(addr); }
-    catch { throw new Error('Invalid address'); }
+    catch { throw new Error('Invalid Solana address'); }
 
     // Try bot relay first (LaserStream-backed, sub-second data)
     const relayData = await relayFetch(`/api/pools/${addr}`);
@@ -543,15 +697,24 @@ async function loadPool() {
       state.activeBin = relayData.activeId;
       state.binStep = relayData.binStep;
       state.currentPrice = binToPrice(relayData.activeId, relayData.binStep);
-      state.tokenXSymbol = 'X'; // TODO: resolve token symbols from mint addresses
-      state.tokenYSymbol = 'Y';
+      state.tokenXSymbol = relayData.tokenXSymbol || 'TOKEN';
+      state.tokenYSymbol = relayData.tokenYSymbol || 'SOL';
     } else {
-      // Fallback: direct RPC via Meteora DLMM SDK (requires npm bundle)
-      // For now, show a message
-      if (!state.connection) {
-        throw new Error('Connect wallet to load pools');
-      }
-      throw new Error('Pool not found on bot relay. Live DLMM SDK loading coming soon.');
+      // Fallback: direct RPC — parse raw lb_pair account bytes
+      const pool = await parseLbPair(addr);
+      const [symX, symY] = await Promise.all([
+        resolveTokenSymbol(pool.tokenXMint),
+        resolveTokenSymbol(pool.tokenYMint),
+      ]);
+
+      state.poolAddress = addr;
+      state.activeBin = pool.activeId;
+      state.binStep = pool.binStep;
+      state.currentPrice = binToPrice(pool.activeId, pool.binStep);
+      state.tokenXSymbol = symX;
+      state.tokenYSymbol = symY;
+      state.tokenXMint = pool.tokenXMint.toBase58();
+      state.tokenYMint = pool.tokenYMint.toBase58();
     }
 
     document.getElementById('poolName').textContent = `${state.tokenXSymbol}/${state.tokenYSymbol}`;
@@ -560,12 +723,482 @@ async function loadPool() {
 
     updateSide(state.side);
     showToast('Pool loaded', 'success');
+    loadBinVizData();
   } catch (err) {
     console.error('Failed to load pool:', err);
     showToast(err.message, 'error');
   } finally {
     if (btn) { btn.textContent = 'load'; btn.disabled = false; }
   }
+}
+
+// ============================================================
+// BIN VISUALIZATION — on-chain liquidity + preview
+// ============================================================
+
+const METEORA_DLMM_PROGRAM = 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo';
+const BINS_PER_ARRAY = 70;
+
+// BinArray layout verified against Meteora DLMM IDL (idl.json):
+//
+// BinArray header (repr C, bytemuck):
+//   8  discriminator
+//   8  index (i64)
+//   1  version (u8)
+//   7  _padding_1 ([u8; 7])
+//   32 lb_pair (pubkey)
+//   = 56 bytes header
+//
+// Bin struct (repr C, bytemuck), 70 per array:
+//   8   amount_x (u64)          offset 0
+//   8   amount_y (u64)          offset 8
+//   16  price (u128)            offset 16
+//   16  liquidity_supply (u128) offset 32
+//   32  function_bytes ([u128; 2])
+//   16  fee_amount_x_per_token_stored (u128)
+//   16  fee_amount_y_per_token_stored (u128)
+//   16  _padding_0 (u128)
+//   16  _padding_1 (u128)
+//   = 144 bytes per bin
+const BIN_ARRAY_HEADER = 56;
+const BIN_SIZE = 144;
+const BIN_AMOUNT_X_OFFSET = 0;
+const BIN_AMOUNT_Y_OFFSET = 8;
+
+function binIdToArrayIndex(binId) {
+  if (binId >= 0) return Math.floor(binId / BINS_PER_ARRAY);
+  return Math.floor((binId - (BINS_PER_ARRAY - 1)) / BINS_PER_ARRAY);
+}
+
+async function fetchBinArrays(poolAddress, centerBin, visibleRange) {
+  const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
+  const conn = state.connection || new solanaWeb3.Connection(rpcUrl, 'confirmed');
+  const poolPubkey = new solanaWeb3.PublicKey(poolAddress);
+  const dlmmProgram = new solanaWeb3.PublicKey(METEORA_DLMM_PROGRAM);
+
+  const lowBin = centerBin - visibleRange;
+  const highBin = centerBin + visibleRange;
+  const lowIdx = binIdToArrayIndex(lowBin);
+  const highIdx = binIdToArrayIndex(highBin);
+
+  const pdas = [];
+  for (let i = lowIdx; i <= highIdx; i++) {
+    // Encode i64 LE using BigInt for correct two's complement
+    const signed = BigInt(i);
+    const unsigned = signed < 0n ? signed + (1n << 64n) : signed;
+    const buf = new Uint8Array(8);
+    for (let byte = 0; byte < 8; byte++) {
+      buf[byte] = Number((unsigned >> BigInt(byte * 8)) & 0xFFn);
+    }
+    const [pda] = solanaWeb3.PublicKey.findProgramAddressSync(
+      [new TextEncoder().encode('bin_array'), poolPubkey.toBytes(), buf],
+      dlmmProgram
+    );
+    pdas.push({ pda, arrayIndex: i });
+  }
+
+  const accounts = await conn.getMultipleAccountsInfo(pdas.map(p => p.pda));
+
+  const bins = new Map();
+  for (let a = 0; a < accounts.length; a++) {
+    const acct = accounts[a];
+    if (!acct) continue;
+    const data = acct.data;
+
+    // Read the actual index from the account (i64 LE at offset 8, after 8-byte discriminator)
+    const idxLo = data.readInt32LE(8);
+    const idxHi = data.readInt32LE(12);
+    const actualIndex = idxHi * 0x100000000 + (idxLo >>> 0);
+    const baseBinId = actualIndex * BINS_PER_ARRAY;
+
+    const expectedBinDataSize = BIN_ARRAY_HEADER + BINS_PER_ARRAY * BIN_SIZE;
+    if (data.length < expectedBinDataSize) {
+      if (CONFIG.DEBUG) console.warn(`BinArray ${actualIndex} unexpected size: ${data.length} (expected ${expectedBinDataSize})`);
+      continue;
+    }
+
+    for (let b = 0; b < BINS_PER_ARRAY; b++) {
+      const offset = BIN_ARRAY_HEADER + b * BIN_SIZE;
+      const amountX = Number(data.readBigUInt64LE(offset + BIN_AMOUNT_X_OFFSET));
+      const amountY = Number(data.readBigUInt64LE(offset + BIN_AMOUNT_Y_OFFSET));
+      const binId = baseBinId + b;
+      if (binId >= lowBin && binId <= highBin && (amountX > 0 || amountY > 0)) {
+        bins.set(binId, { amountX, amountY });
+      }
+    }
+  }
+  return bins;
+}
+
+function computeBidAskPreview(amount, minBin, maxBin, activeBin) {
+  const numBins = maxBin - minBin + 1;
+  if (numBins <= 0 || amount <= 0) return new Map();
+
+  // BidAsk: linear ramp — weight increases with distance from active bin
+  const weights = [];
+  let totalWeight = 0;
+  for (let bin = minBin; bin <= maxBin; bin++) {
+    const dist = Math.abs(bin - activeBin);
+    const w = Math.max(1, dist);
+    weights.push({ bin, w });
+    totalWeight += w;
+  }
+
+  const preview = new Map();
+  for (const { bin, w } of weights) {
+    const share = (w / totalWeight) * amount;
+    preview.set(bin, share);
+  }
+  return preview;
+}
+
+async function fetchUserPositions(poolAddress) {
+  if (!state.connected || !state.publicKey) return [];
+  const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
+  const conn = state.connection || new solanaWeb3.Connection(rpcUrl, 'confirmed');
+  const programId = new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID);
+
+  try {
+    const accounts = await conn.getProgramAccounts(programId, {
+      filters: [
+        { dataSize: 138 }, // Position::SIZE = 8+32+32+32+1+4+4+8+8+8+1 = 138
+        { memcmp: { offset: 8, bytes: state.publicKey.toBase58() } },
+        { memcmp: { offset: 40, bytes: poolAddress } },
+      ],
+    });
+
+    return accounts.map(({ pubkey, account }) => {
+      const data = account.data;
+      const side = data.readUInt8(72) === 0 ? 'buy' : 'sell';
+      const minBinId = data.readInt32LE(73);
+      const maxBinId = data.readInt32LE(77);
+      const initialAmount = Number(data.readBigUInt64LE(81));
+      return { pubkey, side, minBinId, maxBinId, initialAmount };
+    });
+  } catch (err) {
+    if (CONFIG.DEBUG) console.error('Failed to fetch user positions:', err);
+    return [];
+  }
+}
+
+async function fetchAllUserPositions() {
+  if (!state.connected || !state.publicKey) return [];
+  const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
+  const conn = state.connection || new solanaWeb3.Connection(rpcUrl, 'confirmed');
+  const programId = new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID);
+
+  try {
+    const accounts = await conn.getProgramAccounts(programId, {
+      filters: [
+        { dataSize: 138 },
+        { memcmp: { offset: 8, bytes: state.publicKey.toBase58() } },
+      ],
+    });
+
+    return accounts.map(({ pubkey, account }) => {
+      const data = account.data;
+      const lbPair = new solanaWeb3.PublicKey(data.slice(40, 72)).toBase58();
+      const side = data.readUInt8(72) === 0 ? 'buy' : 'sell';
+      const minBinId = data.readInt32LE(73);
+      const maxBinId = data.readInt32LE(77);
+      const initialAmount = Number(data.readBigUInt64LE(81));
+      const harvestedAmount = Number(data.readBigUInt64LE(89));
+      const createdAt = Number(data.readBigInt64LE(97));
+      return { pubkey, lbPair, side, minBinId, maxBinId, initialAmount, harvestedAmount, createdAt };
+    });
+  } catch (err) {
+    if (CONFIG.DEBUG) console.error('Failed to fetch all positions:', err);
+    return [];
+  }
+}
+
+async function renderPositionsPage() {
+  const listEl = document.getElementById('allPositionsList');
+  const countEl = document.getElementById('posPageCount');
+  const depositEl = document.getElementById('posPageDeposited');
+  const harvestEl = document.getElementById('posPageHarvested');
+  const avgFillEl = document.getElementById('posPageAvgFill');
+  if (!listEl) return;
+
+  if (!state.connected) {
+    listEl.innerHTML = '<div class="empty-state">connect wallet to view positions</div>';
+    return;
+  }
+
+  listEl.innerHTML = '<div class="empty-state">loading...</div>';
+  const positions = await fetchAllUserPositions();
+
+  if (positions.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">no positions</div>';
+    if (countEl) countEl.textContent = '0';
+    if (depositEl) depositEl.textContent = '0 SOL';
+    if (harvestEl) harvestEl.textContent = '0 SOL';
+    if (avgFillEl) avgFillEl.textContent = '0%';
+    return;
+  }
+
+  let totalDeposited = 0;
+  let totalHarvested = 0;
+
+  // Resolve pool names for unique lb_pairs
+  const uniquePools = [...new Set(positions.map(p => p.lbPair))];
+  const poolNames = {};
+  for (const pool of uniquePools) {
+    try {
+      const info = await parseLbPair(pool);
+      const [symX, symY] = await Promise.all([
+        resolveTokenSymbol(info.tokenXMint),
+        resolveTokenSymbol(info.tokenYMint),
+      ]);
+      poolNames[pool] = `${symX}/${symY}`;
+    } catch {
+      poolNames[pool] = pool.slice(0, 4) + '...' + pool.slice(-4);
+    }
+  }
+
+  let html = '';
+  for (const pos of positions) {
+    totalDeposited += pos.initialAmount;
+    totalHarvested += pos.harvestedAmount;
+    const fillPct = pos.initialAmount > 0 ? Math.min(100, Math.round((pos.harvestedAmount / pos.initialAmount) * 100)) : 0;
+    const poolName = poolNames[pos.lbPair] || pos.lbPair.slice(0, 8) + '...';
+    const status = fillPct >= 100 ? 'harvested' : 'active';
+
+    html += `<div class="pos-page-row">
+      <span class="pos-pool">${poolName}</span>
+      <span class="pos-side ${pos.side}">${pos.side}</span>
+      <span class="pos-range">${pos.minBinId} → ${pos.maxBinId}</span>
+      <span class="pos-filled">${fillPct}%<div class="pos-fill-bar"><div class="pos-fill-bar-inner ${pos.side}" style="width:${fillPct}%"></div></div></span>
+      <span class="pos-amount">${(pos.initialAmount / 1e9).toFixed(4)}</span>
+      <span class="pos-status ${status}">${status}</span>
+    </div>`;
+  }
+
+  listEl.innerHTML = html;
+  if (countEl) countEl.textContent = positions.length;
+  if (depositEl) depositEl.textContent = (totalDeposited / 1e9).toFixed(4) + ' SOL';
+  if (harvestEl) harvestEl.textContent = (totalHarvested / 1e9).toFixed(4) + ' SOL';
+  const avgFill = positions.reduce((sum, p) => sum + (p.initialAmount > 0 ? p.harvestedAmount / p.initialAmount : 0), 0) / positions.length;
+  if (avgFillEl) avgFillEl.textContent = Math.round(avgFill * 100) + '%';
+}
+
+function aggregateUserBins(positions, activeBin) {
+  const bins = new Map();
+  for (const pos of positions) {
+    const preview = computeBidAskPreview(
+      pos.initialAmount, pos.minBinId, pos.maxBinId, activeBin
+    );
+    for (const [binId, amount] of preview) {
+      bins.set(binId, (bins.get(binId) || 0) + amount);
+    }
+  }
+  return bins;
+}
+
+// Canvas rendering state
+const vizState = {
+  poolBins: new Map(),
+  userBins: new Map(),
+  previewBins: new Map(),
+  activeBin: 0,
+  binStep: 0,
+  visibleRange: 40,
+};
+
+function renderBinViz() {
+  const canvas = document.getElementById('binVizCanvas');
+  if (!canvas) return;
+  const wrap = canvas.parentElement;
+  if (!wrap) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const rect = wrap.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width;
+  const H = rect.height;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const { poolBins, userBins, previewBins, activeBin, binStep, visibleRange } = vizState;
+  if (!binStep) {
+    ctx.fillStyle = 'rgba(58, 90, 140, 0.2)';
+    ctx.font = '300 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('load a pool to see liquidity', W / 2, H / 2);
+    return;
+  }
+
+  const lowBin = activeBin - visibleRange;
+  const highBin = activeBin + visibleRange;
+  const totalBins = highBin - lowBin + 1;
+
+  // Normalize pool and user/preview independently (different scales)
+  let maxPoolLiq = 0;
+  let maxUserLiq = 0;
+  for (let bin = lowBin; bin <= highBin; bin++) {
+    const pool = poolBins.get(bin);
+    const poolTotal = pool ? pool.amountX + pool.amountY : 0;
+    const user = userBins.get(bin) || 0;
+    const preview = previewBins.get(bin) || 0;
+    maxPoolLiq = Math.max(maxPoolLiq, poolTotal);
+    maxUserLiq = Math.max(maxUserLiq, user + preview);
+  }
+  if (maxPoolLiq === 0) maxPoolLiq = 1;
+  if (maxUserLiq === 0) maxUserLiq = 1;
+
+  const yMargin = 24;
+  const xLabelWidth = 72;
+  const barAreaW = W - xLabelWidth - 12;
+  const barAreaH = H - yMargin * 2;
+  const rowH = barAreaH / totalBins;
+  const barH = Math.max(1, rowH * 0.8);
+  const halfBar = barH / 2;
+
+  const poolBuyColor = 'rgba(74, 222, 128, 0.35)';
+  const poolSellColor = 'rgba(239, 68, 68, 0.35)';
+  const poolNeutralColor = 'rgba(58, 90, 140, 0.4)';
+  const userBuyColor = 'rgba(74, 222, 128, 0.7)';
+  const userSellColor = 'rgba(239, 68, 68, 0.7)';
+  const previewBuyColor = 'rgba(74, 222, 128, 0.25)';
+  const previewSellColor = 'rgba(239, 68, 68, 0.25)';
+
+  for (let bin = lowBin; bin <= highBin; bin++) {
+    const idx = bin - lowBin;
+    const yCenter = yMargin + barAreaH - (idx + 0.5) * rowH;
+
+    const pool = poolBins.get(bin);
+    const poolTotal = pool ? pool.amountX + pool.amountY : 0;
+    const user = userBins.get(bin) || 0;
+    const preview = previewBins.get(bin) || 0;
+
+    const colW = barAreaW * 0.46;
+
+    // Pool bar (left column) — colored by buy/sell side
+    if (poolTotal > 0) {
+      const barW = (poolTotal / maxPoolLiq) * colW;
+      if (bin < activeBin) {
+        ctx.fillStyle = poolBuyColor;
+      } else if (bin > activeBin) {
+        ctx.fillStyle = poolSellColor;
+      } else {
+        ctx.fillStyle = poolNeutralColor;
+      }
+      ctx.fillRect(xLabelWidth, yCenter - halfBar, barW, barH);
+    }
+
+    // User + preview bars (right column)
+    const userX = xLabelWidth + barAreaW * 0.54;
+    const isSell = bin > activeBin;
+
+    if (user > 0) {
+      const barW = (user / maxUserLiq) * colW;
+      ctx.fillStyle = isSell ? userSellColor : userBuyColor;
+      ctx.fillRect(userX, yCenter - halfBar, barW, barH);
+    }
+
+    if (preview > 0) {
+      const existingW = user > 0 ? (user / maxUserLiq) * colW : 0;
+      const previewW = (preview / maxUserLiq) * colW;
+      ctx.fillStyle = isSell ? previewSellColor : previewBuyColor;
+      ctx.fillRect(userX + existingW, yCenter - halfBar, previewW, barH);
+    }
+  }
+
+  // Divider line between pool and user columns
+  ctx.strokeStyle = 'rgba(58, 90, 140, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  const divX = xLabelWidth + barAreaW * 0.5;
+  ctx.beginPath();
+  ctx.moveTo(divX, yMargin);
+  ctx.lineTo(divX, H - yMargin);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Column labels
+  ctx.font = '300 8px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(58, 90, 140, 0.4)';
+  ctx.fillText('pool', xLabelWidth + barAreaW * 0.24, yMargin - 6);
+  ctx.fillText('yours', xLabelWidth + barAreaW * 0.76, yMargin - 6);
+
+  // Active price line
+  const activeIdx = activeBin - lowBin;
+  if (activeIdx >= 0 && activeIdx < totalBins) {
+    const activeY = yMargin + barAreaH - (activeIdx + 0.5) * rowH;
+    ctx.strokeStyle = 'rgba(200, 210, 230, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(xLabelWidth, activeY);
+    ctx.lineTo(W - 8, activeY);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(200, 210, 230, 0.8)';
+    ctx.font = '300 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'right';
+    const priceLabel = '$' + formatPrice(binToPrice(activeBin, binStep));
+    ctx.fillText(priceLabel, xLabelWidth - 6, activeY + 3);
+  }
+
+  // Y-axis price labels (every ~10 bins)
+  ctx.fillStyle = 'rgba(58, 90, 140, 0.35)';
+  ctx.font = '300 8px "JetBrains Mono", monospace';
+  ctx.textAlign = 'right';
+  const labelInterval = Math.max(5, Math.round(totalBins / 10));
+  for (let bin = lowBin; bin <= highBin; bin += labelInterval) {
+    if (bin === activeBin) continue;
+    const idx = bin - lowBin;
+    const y = yMargin + barAreaH - (idx + 0.5) * rowH;
+    const price = binToPrice(bin, binStep);
+    ctx.fillText('$' + formatPrice(price), xLabelWidth - 6, y + 3);
+  }
+
+  // Update header meta
+  const metaEl = document.getElementById('binVizMeta');
+  if (metaEl && binStep) {
+    metaEl.textContent = `bin step ${binStep} · ${totalBins} bins`;
+  }
+}
+
+function updateBinVizPreview() {
+  if (!state.poolAddress || state.activeBin == null || !state.binStep) return;
+
+  vizState.activeBin = state.activeBin;
+  vizState.binStep = state.binStep;
+
+  const amount = parseFloat(document.getElementById('amount')?.value) || 0;
+  const { minBin, maxBin } = getRangeBins();
+  const amountLamports = amount * 1e9;
+
+  vizState.previewBins = computeBidAskPreview(amountLamports, minBin, maxBin, state.activeBin);
+  renderBinViz();
+}
+
+async function loadBinVizData() {
+  if (!state.poolAddress || !state.activeBin || !state.binStep) return;
+
+  vizState.activeBin = state.activeBin;
+  vizState.binStep = state.binStep;
+
+  try {
+    vizState.poolBins = await fetchBinArrays(state.poolAddress, state.activeBin, vizState.visibleRange);
+  } catch (err) {
+    if (CONFIG.DEBUG) console.error('Failed to fetch bin arrays:', err);
+    vizState.poolBins = new Map();
+  }
+
+  try {
+    const positions = await fetchUserPositions(state.poolAddress);
+    vizState.userBins = aggregateUserBins(positions, state.activeBin);
+  } catch {
+    vizState.userBins = new Map();
+  }
+
+  updateBinVizPreview();
 }
 
 // ============================================================
@@ -701,16 +1334,122 @@ async function closePosition(index) {
 // RANK PAGE — Monke + Roster (stub — wired to live data in later phase)
 // ============================================================
 
-function renderMonkeList() {
+async function renderMonkeList() {
   const container = document.getElementById('monkeList');
+  const nftGrid = document.getElementById('nftGrid');
   if (!container) return;
 
   if (!state.connected) {
     container.innerHTML = '<div class="empty-state">connect wallet to view your monkes</div>';
+    if (nftGrid) nftGrid.innerHTML = '<div class="empty-state" style="padding:20px;grid-column:1/-1;">connect wallet</div>';
     return;
   }
 
-  container.innerHTML = '<div class="empty-state">no SMB Gen2/Gen3 NFTs found — feed a monke to start earning</div>';
+  container.innerHTML = '<div class="empty-state">scanning for SMB monkes...</div>';
+  if (nftGrid) nftGrid.innerHTML = '<div class="empty-state" style="padding:20px;grid-column:1/-1;">scanning...</div>';
+
+  const nfts = await fetchSMBNfts();
+  state.monkeNfts = nfts;
+
+  if (nfts.length === 0) {
+    container.innerHTML = '<div class="empty-state">no SMB Gen2/Gen3 NFTs found — feed a monke to start earning</div>';
+    if (nftGrid) nftGrid.innerHTML = '<div class="empty-state" style="padding:20px;grid-column:1/-1;">no monkes</div>';
+    return;
+  }
+
+  // Populate NFT grid (left panel)
+  if (nftGrid) {
+    nftGrid.innerHTML = nfts.map((nft, i) => `
+      <div class="nft-card${i === 0 ? ' selected' : ''}" data-idx="${i}" data-mint="${escapeHtml(nft.mint)}">
+        <img src="${escapeHtml(nft.image || '')}" alt="${escapeHtml(nft.name || 'monke')}" loading="lazy" onerror="this.style.display='none'">
+        <span class="nft-gen-tag ${nft.gen === 2 ? 'gen2' : 'gen3'}">${nft.gen === 2 ? 'g2' : 'g3'}</span>
+      </div>
+    `).join('');
+
+    nftGrid.querySelectorAll('.nft-card').forEach(card => {
+      card.addEventListener('click', () => {
+        nftGrid.querySelectorAll('.nft-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        const idx = parseInt(card.dataset.idx);
+        selectMonke(nfts[idx]);
+      });
+    });
+
+    if (nfts.length > 0) selectMonke(nfts[0]);
+  }
+
+  // Populate list (right panel)
+  container.innerHTML = nfts.map((nft, i) => `
+    <div class="monke-row">
+      <span>${escapeHtml(nft.name || nft.mint.slice(0, 8) + '...')}</span>
+      <span class="gen-badge ${nft.gen === 2 ? 'gen2' : 'gen3'}">gen${nft.gen}</span>
+      <span>${nft.weight || 0}</span>
+      <span class="claimable">${nft.claimable || '0'} SOL</span>
+      <button class="action-btn-sm" data-mint="${escapeHtml(nft.mint)}" data-action="claim">claim</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('[data-action="claim"]').forEach(btn => {
+    btn.addEventListener('click', () => handleClaimMonke(btn.dataset.mint));
+  });
+}
+
+function selectMonke(nft) {
+  const nameEl = document.getElementById('nftSelectedName');
+  const genEl = document.getElementById('nftSelectedGen');
+  const infoEl = document.getElementById('nftSelectedInfo');
+  if (infoEl) infoEl.style.display = '';
+  if (nameEl) nameEl.textContent = nft.name || nft.mint.slice(0, 12) + '...';
+  if (genEl) genEl.textContent = 'gen' + nft.gen + (nft.gen === 2 ? ' (2x weight)' : ' (1x weight)');
+  state.selectedMonkeMint = nft.mint;
+}
+
+async function fetchSMBNfts() {
+  if (!state.connection || !state.publicKey) return [];
+  const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
+
+  try {
+    const resp = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 'monke-nfts', method: 'getAssetsByOwner',
+        params: {
+          ownerAddress: state.publicKey.toString(),
+          page: 1, limit: 100,
+          displayOptions: { showCollectionMetadata: true },
+        },
+      }),
+    });
+    const data = await resp.json();
+    const items = data?.result?.items || [];
+
+    const gen2Collection = CONFIG.SMB_COLLECTION;
+    const gen3Collection = CONFIG.SMB_GEN3_COLLECTION;
+    const monkes = [];
+
+    for (const item of items) {
+      const collection = item.grouping?.find(g => g.group_key === 'collection')?.group_value;
+      let gen = 0;
+      if (collection === gen2Collection) gen = 2;
+      else if (collection === gen3Collection) gen = 3;
+      if (gen === 0) continue;
+
+      monkes.push({
+        mint: item.id,
+        name: item.content?.metadata?.name || '',
+        image: item.content?.links?.image || item.content?.files?.[0]?.uri || '',
+        gen,
+        weight: 0,
+        claimable: '0',
+      });
+    }
+
+    return monkes;
+  } catch (err) {
+    console.warn('[monke] NFT fetch failed:', err.message);
+    return [];
+  }
 }
 
 function renderRoster() {
@@ -1027,9 +1766,9 @@ function showSubPage(subName) {
 // NAVIGATION — bottom panel tabs + dots
 // ============================================================
 
-const PAGE_IDS = ['page-enlist', 'page-trade', 'page-rank', 'page-ops', 'page-recon'];
-const PAGE_BODY_CLASSES = ['on-enlist', 'on-trade', 'on-rank', 'on-ops', 'on-recon'];
-const PAGE_ACCENT = ['#F2D662', '#9DE5B5', '#F2D662', '#C4CFCB', '#9DE5B5'];
+const PAGE_IDS = ['page-enlist', 'page-trade', 'page-positions', 'page-rank', 'page-ops', 'page-recon'];
+const PAGE_BODY_CLASSES = ['on-enlist', 'on-trade', 'on-positions', 'on-rank', 'on-ops', 'on-recon'];
+const PAGE_ACCENT = ['#9DE5B5', '#9DE5B5', '#9DE5B5', '#9DE5B5', '#9DE5B5', '#9DE5B5'];
 
 function showPage(idx) {
   state.currentPage = idx;
@@ -1066,15 +1805,42 @@ function showPage(idx) {
     }
   });
 
+  // Nav arrows: show dot on boundaries, arrow when navigable
+  const leftArrow = document.getElementById('navLeft');
+  const rightArrow = document.getElementById('navRight');
+  if (leftArrow) {
+    if (idx === 0) {
+      leftArrow.innerHTML = '<svg width="40" height="56" viewBox="0 0 40 56"><circle cx="20" cy="28" r="3" fill="var(--scaffold)"/></svg>';
+      leftArrow.style.cursor = 'default';
+    } else {
+      leftArrow.innerHTML = '<svg width="40" height="56" viewBox="0 0 40 56"><path d="M 18 28 Q 24 26, 34 18 Q 28 28, 34 38 Q 24 30, 18 28 Z" fill="var(--scaffold)"/></svg>';
+      leftArrow.style.cursor = 'pointer';
+    }
+  }
+  if (rightArrow) {
+    if (idx === PAGE_IDS.length - 1) {
+      rightArrow.innerHTML = '<svg width="40" height="56" viewBox="0 0 40 56"><circle cx="20" cy="28" r="3" fill="var(--scaffold)"/></svg>';
+      rightArrow.style.cursor = 'default';
+    } else {
+      rightArrow.innerHTML = '<svg width="40" height="56" viewBox="0 0 40 56"><path d="M 22 28 Q 16 26, 6 18 Q 12 28, 6 38 Q 16 30, 22 28 Z" fill="var(--scaffold)"/></svg>';
+      rightArrow.style.cursor = 'pointer';
+    }
+  }
+
   // Highlight active pool orbital on Trade page (now idx 1)
   if (idx === 1) {
     const orbitals = document.querySelectorAll('.orbital');
     orbitals.forEach((o, i) => o.classList.toggle('sub-active', i === state.activePoolOrbital));
+    setTimeout(renderBinViz, 50);
   }
 
-  // Activate/deactivate orbital sub-nav based on page (Rank = idx 2)
+  // Positions page
   if (idx === 2) {
-    // On Rank page: show active orbital (monke/roster)
+    renderPositionsPage();
+  }
+
+  // Activate/deactivate orbital sub-nav based on page (Rank = idx 3)
+  if (idx === 3) {
     showSubPage(state.currentSubPage);
   } else {
     // Off Rank page: clear all orbital highlights + sigils
@@ -1104,11 +1870,198 @@ function showToast(msg, type = 'info') {
 window.showToast = showToast;
 
 // ============================================================
+// ENLIST CURVE ESTIMATION — DAMM v2 constant-product virtual reserves
+// ============================================================
+
+const CURVE = {
+  TOTAL_SUPPLY: 1_000_000_000,
+  INIT_PRICE: 0.000001,
+  get VIRTUAL_SOL() { return this.TOTAL_SUPPLY * this.INIT_PRICE; }, // 1000
+  get K() { return this.TOTAL_SUPPLY * this.VIRTUAL_SOL; },          // 1e12
+};
+
+function estimateVaultBuy(solDeposited) {
+  const effectiveSOL = Math.min(solDeposited, 420);
+  const newVSOL = CURVE.VIRTUAL_SOL + effectiveSOL;
+  const newTokens = CURVE.K / newVSOL;
+  const bought = CURVE.TOTAL_SUPPLY - newTokens;
+  const avgPrice = effectiveSOL / bought;
+  const pctSupply = (bought / CURVE.TOTAL_SUPPLY) * 100;
+  const priceImpact = ((avgPrice / CURVE.INIT_PRICE) - 1) * 100;
+  return { bought, avgPrice, pctSupply, priceImpact };
+}
+
+function updateEnlistEstimates(totalDepositSOL, userDepositSOL) {
+  const est = estimateVaultBuy(totalDepositSOL || 0);
+
+  const priceEl = document.getElementById('enlistEstPrice');
+  const tokensEl = document.getElementById('enlistEstTokens');
+  const impactEl = document.getElementById('enlistPriceImpact');
+
+  if (priceEl) priceEl.textContent = est.avgPrice > 0
+    ? est.avgPrice.toFixed(10) + ' SOL'
+    : CURVE.INIT_PRICE.toFixed(6) + ' SOL';
+
+  if (impactEl) {
+    const impact = isFinite(est.priceImpact) ? est.priceImpact : 0;
+    impactEl.textContent = '+' + impact.toFixed(1) + '%';
+    impactEl.style.color = impact > 20 ? 'var(--sell)' : 'var(--dim)';
+  }
+
+  if (tokensEl && userDepositSOL > 0 && totalDepositSOL > 0) {
+    const userShare = userDepositSOL / totalDepositSOL;
+    const userTokens = Math.floor(est.bought * userShare);
+    tokensEl.textContent = userTokens.toLocaleString() + ' $BANANAS';
+  } else if (tokensEl) {
+    tokensEl.textContent = '—';
+  }
+}
+
+// Expose so enlist.js bundle can call it after fetching vault stats
+window.updateEnlistEstimates = updateEnlistEstimates;
+
+// Static fallback — show init price before vault stats load
+updateEnlistEstimates(0, 0);
+
+// ============================================================
 // INITIALIZATION
 // ============================================================
 
+// ============================================================
+// ENLIST WALLET BALANCE (Phase 1 — before bundle loads deposit form)
+// ============================================================
+
+async function updateEnlistBalance() {
+  if (!state.connected || !state.connection || !state.publicKey) return;
+  try {
+    const balance = await state.connection.getBalance(state.publicKey);
+    const sol = (balance / 1e9).toFixed(4);
+    const wrap = document.getElementById('enlistPhase1BalanceWrap');
+    const el = document.getElementById('enlistPhase1Balance');
+    if (wrap) wrap.style.display = '';
+    if (el) el.textContent = sol;
+    // Also update Phase 2 element if it exists (covers enlist.js lag)
+    const el2 = document.getElementById('enlistWalletBalance');
+    if (el2) el2.textContent = sol;
+  } catch {}
+}
+
+// ============================================================
+// ENLIST COUNTDOWN (runs from app.js — no bundle dependency)
+// ============================================================
+
+async function initEnlistCountdown() {
+  const depositOpensAt = CONFIG.DEPOSIT_OPENS_AT || 0;
+  let activationPoint = CONFIG.ACTIVATION_POINT || 0;
+
+  // Read activation point from the Alpha Vault account on-chain
+  if (CONFIG.ALPHA_VAULT_ADDRESS) {
+    try {
+      const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
+      const conn = new solanaWeb3.Connection(rpcUrl, 'confirmed');
+      const vaultPubkey = new solanaWeb3.PublicKey(CONFIG.ALPHA_VAULT_ADDRESS);
+
+      // The vault stores the pool address at bytes 9-41 (after 8-byte discriminator + 1-byte poolType).
+      // We fetch the pool account and read activationPoint from it.
+      // But simpler: the DAMM v2 pool stores activationPoint as i64 at a known offset.
+      // The pool is in config. Read its activationPoint directly.
+      // DAMM v2 pool: activationPoint is i64 at byte offset 472
+      const poolPubkey = new solanaWeb3.PublicKey(CONFIG.DAMM_V2_POOL);
+      const poolInfo = await conn.getAccountInfo(poolPubkey);
+      if (poolInfo && poolInfo.data.length >= 480) {
+        const dv = new DataView(poolInfo.data.buffer, poolInfo.data.byteOffset);
+        const val = Number(dv.getBigInt64(472, true));
+        if (val > 1700000000 && val < 2000000000) {
+          activationPoint = val;
+          console.log('[enlist] Activation point from on-chain:', val, '=', new Date(val * 1000).toISOString());
+        }
+      }
+    } catch (err) {
+      console.warn('[enlist] On-chain activation read failed, using config fallback:', err.message);
+    }
+  }
+
+  function enlistPhase() {
+    const now = Math.floor(Date.now() / 1000);
+    if (depositOpensAt <= 0) return 'countdown';
+    if (now < depositOpensAt) return 'countdown';
+    if (activationPoint > 0 && now < activationPoint) return 'deposit';
+    if (activationPoint > 0) return 'claim';
+    return 'deposit';
+  }
+
+  function showEnlistPhase(phase) {
+    const ids = {
+      countdown: 'enlistPhaseCountdown',
+      deposit: 'enlistPhaseDeposit',
+      claim: 'enlistPhaseClaim',
+    };
+    Object.values(ids).forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    const active = document.getElementById(ids[phase]);
+    if (active) active.style.display = '';
+  }
+
+  function updateEnlistCountdown() {
+    const now = Math.floor(Date.now() / 1000);
+    const phase = enlistPhase();
+    showEnlistPhase(phase);
+
+    let target = 0;
+    if (phase === 'countdown') target = depositOpensAt;
+    else if (phase === 'deposit') target = activationPoint;
+    else return;
+
+    const diff = Math.max(0, target - now);
+    const days = Math.floor(diff / 86400);
+    const hours = Math.floor((diff % 86400) / 3600);
+    const mins = Math.floor((diff % 3600) / 60);
+    const secs = diff % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+
+    if (phase === 'countdown') {
+      const el = (id) => document.getElementById(id);
+      if (el('countdownDays')) el('countdownDays').textContent = pad(days);
+      if (el('countdownHours')) el('countdownHours').textContent = pad(hours);
+      if (el('countdownMins')) el('countdownMins').textContent = pad(mins);
+      if (el('countdownSecs')) el('countdownSecs').textContent = pad(secs);
+    } else if (phase === 'deposit') {
+      const el = (id) => document.getElementById(id);
+      if (el('activationDays')) el('activationDays').textContent = pad(days);
+      if (el('activationHours')) el('activationHours').textContent = pad(hours);
+      if (el('activationMins')) el('activationMins').textContent = pad(mins);
+      if (el('activationSecs')) el('activationSecs').textContent = pad(secs);
+    }
+  }
+
+  // Show $BANANAS address
+  const addrEl = document.getElementById('enlistBananasAddress');
+  if (addrEl && CONFIG.BANANAS_MINT) {
+    const mint = CONFIG.BANANAS_MINT;
+    const short = mint.slice(0, 6) + '...' + mint.slice(-4);
+    addrEl.innerHTML = '<a href="https://solscan.io/token/' + mint + '" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">' + short + '</a>';
+  }
+
+  // Show DAMM v2 pool link
+  const poolLinkEl = document.getElementById('enlistPoolLink');
+  if (poolLinkEl && CONFIG.DAMM_V2_POOL) {
+    const pool = CONFIG.DAMM_V2_POOL;
+    const shortPool = pool.slice(0, 6) + '...' + pool.slice(-4);
+    poolLinkEl.innerHTML = '<a href="https://app.meteora.ag/pools/' + pool + '" target="_blank" rel="noopener" style="color:var(--mint);text-decoration:none;">' + shortPool + '</a> <span style="color:var(--dim);font-size:8px;">meteora</span>';
+  }
+
+  // Run immediately + every second
+  updateEnlistCountdown();
+  setInterval(updateEnlistCountdown, 1000);
+}
+
 async function init() {
   await loadConfig();
+
+  // Start enlist countdown immediately (no bundle needed)
+  initEnlistCountdown();
 
   // Connect to bot relay (LaserStream WebSocket + REST)
   connectRelay();
@@ -1133,13 +2086,34 @@ async function init() {
     if (e.key === 'Enter') loadPool();
   });
 
-  // Side tabs
-  document.querySelectorAll('.side-tab').forEach(tab => {
-    tab.addEventListener('click', () => updateSide(tab.dataset.side));
+  // Zoom controls
+  const ZOOM_STEPS = [10, 20, 40, 80, 120, 200];
+  document.getElementById('zoomIn')?.addEventListener('click', () => {
+    const curIdx = ZOOM_STEPS.indexOf(vizState.visibleRange);
+    const newIdx = Math.max(0, (curIdx >= 0 ? curIdx : 2) - 1);
+    vizState.visibleRange = ZOOM_STEPS[newIdx];
+    document.getElementById('zoomLevel').textContent = '±' + vizState.visibleRange;
+    loadBinVizData();
+  });
+  document.getElementById('zoomOut')?.addEventListener('click', () => {
+    const curIdx = ZOOM_STEPS.indexOf(vizState.visibleRange);
+    const newIdx = Math.min(ZOOM_STEPS.length - 1, (curIdx >= 0 ? curIdx : 2) + 1);
+    vizState.visibleRange = ZOOM_STEPS[newIdx];
+    document.getElementById('zoomLevel').textContent = '±' + vizState.visibleRange;
+    loadBinVizData();
   });
 
+  // Side tabs
+  document.querySelectorAll('.side-tab').forEach(tab => {
+    tab.addEventListener('click', () => { updateSide(tab.dataset.side); updateBinVizPreview(); });
+  });
+
+  // Range inputs → update bin strip
+  document.getElementById('rangeNear')?.addEventListener('input', () => { updateBinStrip(); updateBinVizPreview(); });
+  document.getElementById('rangeFar')?.addEventListener('input', () => { updateBinStrip(); updateBinVizPreview(); });
+
   // Amount
-  document.getElementById('amount')?.addEventListener('input', updateFee);
+  document.getElementById('amount')?.addEventListener('input', () => { updateFee(); updateBinVizPreview(); });
 
   // Action
   document.getElementById('actionBtn')?.addEventListener('click', createPosition);
@@ -1157,13 +2131,19 @@ async function init() {
     if (state.currentPage > 0) showPage(state.currentPage - 1);
   });
   document.getElementById('navRight')?.addEventListener('click', () => {
-    if (state.currentPage < 4) showPage(state.currentPage + 1);
+    if (state.currentPage < PAGE_IDS.length - 1) showPage(state.currentPage + 1);
   });
 
   // Enlist page buttons
-  document.getElementById('enlistGoToRank')?.addEventListener('click', () => showPage(2));
+  document.getElementById('enlistGoToRank')?.addEventListener('click', () => showPage(3));
   document.getElementById('enlistConnectBtn')?.addEventListener('click', () => {
     document.getElementById('connectWallet')?.click();
+  });
+  document.getElementById('enlistHelpBtn')?.addEventListener('click', () => {
+    document.getElementById('enlistHelpModal')?.classList.add('visible');
+  });
+  document.getElementById('enlistHelpClose')?.addEventListener('click', () => {
+    document.getElementById('enlistHelpModal')?.classList.remove('visible');
   });
 
   // Arrow hover highlights target orbit
@@ -1190,20 +2170,20 @@ async function init() {
   const orbitalArray = Array.from(orbitals);
   orbitals.forEach((o, i) => {
     o.addEventListener('click', () => {
-      if (state.currentPage === 2 && o.dataset.sub) {
+      if (state.currentPage === 3 && o.dataset.sub) {
         showSubPage(o.dataset.sub);
       }
     });
     // Reactive sigil on hover (Rank page)
     o.addEventListener('mouseenter', () => {
-      if (state.currentPage === 2 && o.dataset.sub) {
+      if (state.currentPage === 3 && o.dataset.sub) {
         document.querySelectorAll('.orbital-sigil').forEach(g => {
           g.setAttribute('opacity', g.dataset.sub === o.dataset.sub ? '1' : '0');
         });
       }
     });
     o.addEventListener('mouseleave', () => {
-      if (state.currentPage === 2) {
+      if (state.currentPage === 3) {
         document.querySelectorAll('.orbital-sigil').forEach(g => {
           g.setAttribute('opacity', g.dataset.sub === state.currentSubPage ? '0.4' : '0');
         });
@@ -1211,7 +2191,11 @@ async function init() {
     });
   });
 
-  // Rank: claim all
+  // Rank: feed + claim
+  document.getElementById('feedMonkeBtn')?.addEventListener('click', () => {
+    if (state.selectedMonkeMint) handleFeedMonke(state.selectedMonkeMint);
+    else showToast('Select a monke first', 'error');
+  });
   document.getElementById('claimAllBtn')?.addEventListener('click', handleClaimAll);
 
   // Rank: MonkeBurn lookup
@@ -1280,6 +2264,13 @@ async function init() {
     }
   }, 500);
 }
+
+// Canvas resize handler
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderBinViz, 100);
+});
 
 // Start
 if (document.readyState === 'loading') {

@@ -50,25 +50,36 @@ console.log(`  ${original.length} → ${minified.length} bytes (${savings}% redu
 
 // 2. Bundle enlist.js (Alpha Vault SDK) — only if src/enlist.js exists
 const enlistEntry = join(root, 'src', 'enlist.js');
+const isDev = process.argv.includes('--dev');
 if (existsSync(enlistEntry)) {
   console.log('Bundling enlist.js (Alpha Vault SDK)...');
+  const enlistOutDir = isDev ? publicDir : distDir;
   const enlistResult = await esbuild.build({
     entryPoints: [enlistEntry],
-    outfile: join(distDir, 'enlist.bundle.js'),
+    outfile: join(enlistOutDir, 'enlist.bundle.js'),
     bundle: true,
-    minify: true,
+    minify: !isDev,
     sourcemap: true,
     target: ['es2020'],
     format: 'iife',
     charset: 'utf8',
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: {
+      'process.env.NODE_ENV': isDev ? '"development"' : '"production"',
+      'process.env.BROWSER': '"true"',
+      'process.version': '""',
+      'process.platform': '""',
+      'process.stdout': 'null',
+      'process.stderr': 'null',
+      global: 'globalThis',
+    },
+    inject: [join(root, 'scripts', 'process-shim.mjs')],
     external: [],
   });
   if (enlistResult.errors.length > 0) {
     console.error('Enlist build errors:', enlistResult.errors);
     process.exit(1);
   }
-  console.log('  enlist.bundle.js created');
+  console.log(`  enlist.bundle.js → ${isDev ? 'public/' : 'dist/'}`);
 } else {
   console.log('Skipping enlist.js (not found at src/enlist.js)');
 }

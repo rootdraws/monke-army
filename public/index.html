@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data: https://*.helius-rpc.com; connect-src 'self' https://*.solana.com https://*.helius-rpc.com https://public-api.birdeye.so https://lite-api.jup.ag https://quote-api.jup.ag wss://*.solana.com ws://localhost:* wss://*;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data: https://*.helius-rpc.com https://arweave.net https://*.arweave.net https://*.nftstorage.link https://nftstorage.link https://ipfs.io https://*.ipfs.io https://shdw-drive.genesysgo.net https://*.shdw-drive.genesysgo.net https://*.cloudfront.net https://img-cdn.magiceden.dev https://*.magiceden.dev; connect-src 'self' https://*.solana.com https://*.helius-rpc.com https://public-api.birdeye.so https://lite-api.jup.ag https://quote-api.jup.ag https://unpkg.com wss://*.solana.com ws://localhost:* wss://*;">
   <title>monke.army</title>
   <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,24 +24,6 @@
   <div class="corner top-left">
     <svg viewBox="0 0 200 200">
       <path d="M 80 1 A 80 80 0 0 0 1 80 L 11 80 A 70 70 0 0 1 80 11 Z" fill="var(--scaffold-fill)"/>
-      <circle class="hoverable" cx="98" cy="98" r="45" fill="none" stroke="var(--scaffold)" stroke-width="1.5"/>
-      <!-- Rank sub-page sigils (monke + roster) -->
-      <g class="orbital-sigil" data-sub="monke" opacity="0">
-        <circle cx="98" cy="98" r="2" fill="var(--bananas)"/>
-        <circle cx="98" cy="86" r="1.2" fill="var(--bananas)"/>
-        <circle cx="106" cy="90" r="1" fill="var(--bananas)"/>
-        <circle cx="90" cy="93" r="1" fill="var(--bananas)"/>
-        <circle cx="104" cy="103" r="1" fill="var(--bananas)" opacity="0.7"/>
-        <circle cx="92" cy="106" r="1" fill="var(--bananas)" opacity="0.7"/>
-      </g>
-      <g class="orbital-sigil" data-sub="roster" opacity="0">
-        <circle cx="98" cy="98" r="28" fill="none" stroke="var(--bananas)" stroke-width="1" stroke-dasharray="4 4" opacity="0.5"/>
-        <circle cx="98" cy="98" r="16" fill="none" stroke="var(--bananas)" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>
-        <circle cx="98" cy="98" r="2" fill="var(--bananas)"/>
-      </g>
-      <!-- Orbital sub-nav circles: monke + roster -->
-      <circle class="hoverable orbital" data-sub="monke" cx="55" cy="40" r="10" fill="none" stroke="var(--scaffold)" stroke-width="1.5"><title>monke</title></circle>
-      <circle class="hoverable orbital" data-sub="roster" cx="40" cy="55" r="8" fill="none" stroke="var(--scaffold)" stroke-width="1.5"><title>roster</title></circle>
     </svg>
   </div>
 
@@ -100,26 +82,10 @@
   <div class="site-page active" id="page-enlist">
     <div class="page-body">
 
+      <button class="enlist-help-btn" id="enlistHelpBtn">?</button>
+
       <!-- Phase 1: Pre-deposit countdown -->
       <div class="enlist-phase" id="enlistPhaseCountdown">
-        <div class="enlist-hero">
-          <div class="enlist-title">join the army</div>
-          <div class="enlist-subtitle">deposit sol. everyone gets the same price.</div>
-        </div>
-
-        <div class="countdown-container">
-          <div class="countdown-label">vault opens in</div>
-          <div class="countdown-timer" id="enlistCountdown">
-            <div class="countdown-unit"><span class="countdown-num" id="countdownDays">00</span><span class="countdown-tag">days</span></div>
-            <div class="countdown-sep">:</div>
-            <div class="countdown-unit"><span class="countdown-num" id="countdownHours">00</span><span class="countdown-tag">hours</span></div>
-            <div class="countdown-sep">:</div>
-            <div class="countdown-unit"><span class="countdown-num" id="countdownMins">00</span><span class="countdown-tag">mins</span></div>
-            <div class="countdown-sep">:</div>
-            <div class="countdown-unit"><span class="countdown-num" id="countdownSecs">00</span><span class="countdown-tag">secs</span></div>
-          </div>
-        </div>
-
         <div class="stats-grid">
           <div><div class="stat-label">init price</div><div class="stat-value">0.000001 SOL</div></div>
           <div><div class="stat-label">max vault</div><div class="stat-value">420 SOL</div></div>
@@ -127,24 +93,33 @@
           <div><div class="stat-label">dev allocation</div><div class="stat-value green">zero</div></div>
         </div>
 
-        <div class="enlist-explainer">
-          <p>100% of supply into a permanently locked DAMM v2 pool. Alpha Vault pro-rata — everyone gets the same price. 420 SOL max capacity.</p>
-          <p>Zero dev allocation. Zero dev fee. 100% of all protocol fees to monke holders who burned $BANANAS.</p>
-          <p>69% sniper tax decaying to 1% over 3 hours. Your entry through the vault pays zero trading fee.</p>
+        <div class="enlist-explainer">pro-rata fair launch. deposit SOL, everyone gets the same price. if total deposits exceed 420 SOL, your allocation is proportional to your share. 100% of supply enters the pool. zero dev tokens.</div>
+
+        <div class="enlist-countdown">
+          <span class="stat-label">vault opens in</span>
+          <span class="countdown-inline" id="enlistCountdown">
+            <span id="countdownDays">00</span>d
+            <span id="countdownHours">00</span>h
+            <span id="countdownMins">00</span>m
+            <span id="countdownSecs">00</span>s
+          </span>
         </div>
 
-        <div class="enlist-cta">
-          <button class="action-btn" id="enlistConnectBtn">connect wallet to enlist</button>
+        <div class="enlist-mint-line">
+          <span class="stat-label">$BANANAS</span>
+          <span class="stat-value" id="enlistBananasAddress" style="font-size:9px;">—</span>
         </div>
+        <div class="enlist-mint-line">
+          <span class="stat-label">pool</span>
+          <span class="stat-value" id="enlistPoolLink" style="font-size:9px;">—</span>
+        </div>
+
+        <button class="action-btn" id="enlistConnectBtn">connect wallet to enlist</button>
+        <div class="deposit-balance" id="enlistPhase1BalanceWrap" style="display:none; margin-top:8px;">wallet: <span id="enlistPhase1Balance">—</span> SOL</div>
       </div>
 
       <!-- Phase 2: Deposit open -->
       <div class="enlist-phase" id="enlistPhaseDeposit" style="display:none;">
-        <div class="enlist-hero">
-          <div class="enlist-title">deposit sol</div>
-          <div class="enlist-subtitle">vault is open. everyone gets the same price.</div>
-        </div>
-
         <div class="stats-grid">
           <div><div class="stat-label">total deposited</div><div class="stat-value" id="enlistTotalDeposited">0 SOL</div></div>
           <div><div class="stat-label">your deposit</div><div class="stat-value" id="enlistYourDeposit">0 SOL</div></div>
@@ -152,37 +127,47 @@
           <div><div class="stat-label">vault capacity</div><div class="stat-value" id="enlistCapacity">0 / 420 SOL</div></div>
         </div>
 
+        <div class="enlist-estimate">
+          <div class="enlist-estimate-row">
+            <span class="stat-label">est. entry price</span>
+            <span class="stat-value" id="enlistEstPrice">0.000001 SOL</span>
+          </div>
+          <div class="enlist-estimate-row">
+            <span class="stat-label">est. your tokens</span>
+            <span class="stat-value bananas" id="enlistEstTokens">—</span>
+          </div>
+          <div class="enlist-estimate-row">
+            <span class="stat-label">price impact</span>
+            <span class="stat-value" id="enlistPriceImpact">+0%</span>
+          </div>
+        </div>
+
         <div class="enlist-deposit-form">
           <div class="deposit-input-row">
-            <input type="number" class="deposit-input" id="enlistAmountInput" placeholder="SOL amount" step="0.1" min="0">
+            <input type="number" class="deposit-input" id="enlistAmountInput" placeholder="SOL" step="0.1" min="0">
             <button class="action-btn-sm" id="enlistMaxBtn">max</button>
           </div>
           <div class="deposit-balance">wallet: <span id="enlistWalletBalance">—</span> SOL</div>
-          <button class="action-btn" id="enlistDepositBtn">deposit</button>
-          <button class="action-btn-sm" id="enlistWithdrawBtn" style="display:none;">withdraw deposit</button>
+          <button class="action-btn" id="enlistDepositBtn">deposit SOL</button>
         </div>
 
-        <div class="countdown-container">
-          <div class="countdown-label">pool activates in</div>
-          <div class="countdown-timer" id="enlistActivationCountdown">
-            <div class="countdown-unit"><span class="countdown-num" id="activationDays">00</span><span class="countdown-tag">days</span></div>
-            <div class="countdown-sep">:</div>
-            <div class="countdown-unit"><span class="countdown-num" id="activationHours">00</span><span class="countdown-tag">hours</span></div>
-            <div class="countdown-sep">:</div>
-            <div class="countdown-unit"><span class="countdown-num" id="activationMins">00</span><span class="countdown-tag">mins</span></div>
-            <div class="countdown-sep">:</div>
-            <div class="countdown-unit"><span class="countdown-num" id="activationSecs">00</span><span class="countdown-tag">secs</span></div>
-          </div>
+        <div class="enlist-countdown">
+          <span class="stat-label">tokens drop in</span>
+          <span class="countdown-inline" id="enlistActivationCountdown">
+            <span id="activationDays">00</span>d
+            <span id="activationHours">00</span>h
+            <span id="activationMins">00</span>m
+            <span id="activationSecs">00</span>s
+          </span>
+        </div>
+
+        <div class="enlist-secondary-actions">
+          <button class="action-btn-sm enlist-withdraw" id="enlistWithdrawBtn" style="display:none;">withdraw</button>
         </div>
       </div>
 
       <!-- Phase 3: Post-activation / Claim -->
       <div class="enlist-phase" id="enlistPhaseClaim" style="display:none;">
-        <div class="enlist-hero">
-          <div class="enlist-title">claim $bananas</div>
-          <div class="enlist-subtitle">pool is live. claim your tokens. feed your monke.</div>
-        </div>
-
         <div class="stats-grid">
           <div><div class="stat-label">your $BANANAS</div><div class="stat-value green" id="enlistBananasBalance">0</div></div>
           <div><div class="stat-label">your deposit</div><div class="stat-value" id="enlistClaimDeposit">0 SOL</div></div>
@@ -190,12 +175,13 @@
           <div><div class="stat-label">pool liquidity</div><div class="stat-value" id="enlistPoolLiquidity">—</div></div>
         </div>
 
-        <div class="enlist-claim-section">
-          <button class="action-btn" id="enlistClaimBtn">claim $bananas</button>
-          <div class="enlist-next-step">
-            <span class="dim">got your $BANANAS?</span>
-            <button class="action-btn-sm" id="enlistGoToRank">feed your monke →</button>
-          </div>
+        <button class="action-btn" id="enlistClaimBtn">claim $bananas</button>
+        <div class="enlist-secondary-actions">
+          <button class="action-btn-sm enlist-withdraw" id="enlistRefundBtn" style="display:none;">withdraw excess SOL</button>
+        </div>
+        <div class="enlist-next-step">
+          <span class="dim">got your $BANANAS?</span>
+          <button class="action-btn-sm" id="enlistGoToRank">feed your monke →</button>
         </div>
       </div>
 
@@ -207,77 +193,95 @@
        ═══════════════════════════════════════════════════════════ -->
   <div class="site-page" id="page-trade">
 
-    <div class="tangent-ray top-section-bottom"></div>
-    <div class="tangent-ray bottom-section-top-left"></div>
-    <div class="tangent-ray bottom-section-top-right"></div>
-    <div class="tangent-ray bottom-section-bottom-left"></div>
-    <div class="tangent-ray bottom-section-bottom-right"></div>
-    <div class="tangent-ray bottom-section-left"></div>
-    <div class="tangent-ray bottom-section-left-inner"></div>
-    <div class="tangent-ray bottom-section-right"></div>
-    <div class="tangent-ray bottom-section-right-inner"></div>
-
-    <div class="positions-panel">
-      <div class="panel-corner top-left"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-tl-fd" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-tl-fr" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 80 35 A 45 45 0 0 0 35 80" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="80" cy="80" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="35" y1="80" x2="35" y2="300" stroke="url(#pp-tl-fd)" stroke-width="1"/><line x1="80" y1="35" x2="350" y2="35" stroke="url(#pp-tl-fr)" stroke-width="1"/></svg></div>
-      <div class="panel-corner top-right"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-tr-fd" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-tr-fl" x1="100%" y1="0%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 120 35 A 45 45 0 0 1 165 80" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="120" cy="80" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="165" y1="80" x2="165" y2="300" stroke="url(#pp-tr-fd)" stroke-width="1"/><line x1="120" y1="35" x2="-100" y2="35" stroke="url(#pp-tr-fl)" stroke-width="1"/></svg></div>
-      <div class="panel-corner bottom-left"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-bl-fu" x1="0%" y1="100%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-bl-fr" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 35 120 A 45 45 0 0 0 80 165" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="80" cy="120" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="35" y1="120" x2="35" y2="-100" stroke="url(#pp-bl-fu)" stroke-width="1"/><line x1="80" y1="165" x2="350" y2="165" stroke="url(#pp-bl-fr)" stroke-width="1"/></svg></div>
-      <div class="panel-corner bottom-right"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-br-fu" x1="0%" y1="100%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-br-fl" x1="100%" y1="0%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 165 120 A 45 45 0 0 1 120 165" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="120" cy="120" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="165" y1="120" x2="165" y2="-100" stroke="url(#pp-br-fu)" stroke-width="1"/><line x1="120" y1="165" x2="-150" y2="165" stroke="url(#pp-br-fl)" stroke-width="1"/></svg></div>
-      <div class="panel-corner top-inner-left"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-til-fd" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-til-fl" x1="100%" y1="0%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 120 35 A 45 45 0 0 1 165 80" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="120" cy="80" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="165" y1="80" x2="165" y2="300" stroke="url(#pp-til-fd)" stroke-width="1"/><line x1="120" y1="35" x2="-100" y2="35" stroke="url(#pp-til-fl)" stroke-width="1"/></svg></div>
-      <div class="panel-corner bottom-inner-left"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-bil-fu" x1="0%" y1="100%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-bil-fl" x1="100%" y1="0%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 165 120 A 45 45 0 0 1 120 165" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="120" cy="120" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="165" y1="120" x2="165" y2="-100" stroke="url(#pp-bil-fu)" stroke-width="1"/><line x1="120" y1="165" x2="-150" y2="165" stroke="url(#pp-bil-fl)" stroke-width="1"/></svg></div>
-      <div class="panel-corner top-inner-right"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-tir-fd" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-tir-fr" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 80 35 A 45 45 0 0 0 35 80" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="80" cy="80" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="35" y1="80" x2="35" y2="300" stroke="url(#pp-tir-fd)" stroke-width="1"/><line x1="80" y1="35" x2="350" y2="35" stroke="url(#pp-tir-fr)" stroke-width="1"/></svg></div>
-      <div class="panel-corner bottom-inner-right"><svg viewBox="0 0 200 200"><defs><linearGradient id="pp-bir-fu" x1="0%" y1="100%" x2="0%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient><linearGradient id="pp-bir-fr" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="var(--scaffold)"/><stop offset="100%" stop-color="var(--scaffold)" stop-opacity="0"/></linearGradient></defs><path d="M 35 120 A 45 45 0 0 0 80 165" fill="none" stroke="var(--scaffold)" stroke-width="1.5" stroke-linecap="round"/><circle cx="80" cy="120" r="45" fill="none" stroke="var(--scaffold)" stroke-width="0.75" stroke-dasharray="4 4" opacity="0.3"/><line x1="35" y1="120" x2="35" y2="-100" stroke="url(#pp-bir-fu)" stroke-width="1"/><line x1="80" y1="165" x2="350" y2="165" stroke="url(#pp-bir-fr)" stroke-width="1"/></svg></div>
-    </div>
-
-    <div class="bottom-content">
-      <div class="bottom-left-wing">
-        <div class="pool-section">
-          <input type="text" class="pool-input" id="poolAddress" placeholder="pool" value="">
-          <button class="load-btn" id="loadPool">load</button>
-        </div>
-
-        <div class="pool-info" id="poolInfo">
-          <div class="pool-stat"><div class="pool-stat-label">Pool</div><div class="pool-stat-value" id="poolName">—</div></div>
-          <div class="pool-stat"><div class="pool-stat-label">Price</div><div class="pool-stat-value" id="currentPrice">—</div></div>
-        </div>
-
-        <div class="side-tabs">
-          <button class="side-tab buy active" data-side="buy">buy</button>
-          <button class="side-tab sell" data-side="sell">sell</button>
-        </div>
-
-        <div class="range-section">
-          <div class="range-row">
-            <span class="range-label">from</span>
-            <input type="number" class="range-input" id="rangeNear" value="5" min="0.1" step="1">
-            <span class="range-suffix" id="rangeSuffix">% below</span>
-          </div>
-          <div class="range-row">
-            <span class="range-label">to</span>
-            <input type="number" class="range-input" id="rangeFar" value="50" min="0.1" step="1">
-            <span class="range-suffix" id="rangeSuffixFar">% below</span>
+    <div class="trade-layout">
+      <!-- LEFT: Bin Visualization -->
+      <div class="trade-left-panel">
+        <div class="bin-viz-header">
+          <span class="bin-viz-title" id="binVizTitle">liquidity distribution</span>
+          <span class="bin-viz-meta" id="binVizMeta"></span>
+          <div class="bin-viz-zoom">
+            <button class="zoom-btn" id="zoomOut">−</button>
+            <span class="zoom-level" id="zoomLevel">±40</span>
+            <button class="zoom-btn" id="zoomIn">+</button>
           </div>
         </div>
-
-        <div class="amount-section">
-          <div class="amount-row">
-            <input type="number" class="amount-input" id="amount" placeholder="0.0" value="1" step="0.01" min="0">
-            <span class="amount-token" id="amountToken">SOL</span>
-          </div>
-          <div class="fee-display"><span class="fee-value" id="feeAmount">0.3% on output</span></div>
-          <button class="action-btn buy" id="actionBtn">buy</button>
+        <div class="bin-viz-wrap">
+          <canvas id="binVizCanvas"></canvas>
+        </div>
+        <div class="bin-viz-legend">
+          <span class="legend-item"><span class="legend-swatch pool-buy-swatch"></span>pool buy</span>
+          <span class="legend-item"><span class="legend-swatch pool-sell-swatch"></span>pool sell</span>
+          <span class="legend-item"><span class="legend-swatch yours-swatch"></span>yours</span>
+          <span class="legend-item"><span class="legend-swatch preview-swatch"></span>preview</span>
         </div>
       </div>
 
-      <div class="bottom-right-wing">
-        <div class="positions-header"><span>pool</span><span>side</span><span>filled</span><span></span><span></span></div>
-        <div id="positionsList"><div class="empty-state">no positions</div></div>
+      <!-- RIGHT: Order Form -->
+      <div class="trade-right-panel">
+        <div class="trade-order-form">
+          <div class="pool-section">
+            <input type="text" class="pool-input" id="poolAddress" placeholder="DLMM pool address" value="">
+            <button class="load-btn" id="loadPool">load</button>
+          </div>
+
+          <div class="pool-info" id="poolInfo">
+            <div class="pool-stat"><div class="pool-stat-label">Pool</div><div class="pool-stat-value" id="poolName">—</div></div>
+            <div class="pool-stat"><div class="pool-stat-label">Price</div><div class="pool-stat-value" id="currentPrice">—</div></div>
+          </div>
+
+          <div class="side-tabs">
+            <button class="side-tab buy active" data-side="buy">buy</button>
+            <button class="side-tab sell" data-side="sell">sell</button>
+          </div>
+
+          <div class="range-section">
+            <div class="range-row">
+              <span class="range-label">from</span>
+              <input type="number" class="range-input" id="rangeNear" value="0.5" min="0.1" step="0.1">
+              <span class="range-suffix" id="rangeSuffix">% below</span>
+            </div>
+            <div class="range-row">
+              <span class="range-label">to</span>
+              <input type="number" class="range-input" id="rangeFar" value="7" min="0.1" step="0.5">
+              <span class="range-suffix" id="rangeSuffixFar">% below</span>
+            </div>
+          </div>
+
+          <div class="amount-section">
+            <div class="amount-row">
+              <input type="number" class="amount-input" id="amount" placeholder="0.0" value="1" step="0.01" min="0">
+              <span class="amount-token" id="amountToken">SOL</span>
+            </div>
+            <div class="fee-display"><span class="fee-value" id="feeAmount">0.3% on output</span></div>
+            <button class="action-btn buy" id="actionBtn">buy</button>
+          </div>
+        </div>
       </div>
     </div>
 
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       PAGE 2: RANK — feed your monke, claim SOL
+       PAGE 2: POSITIONS — all wallet positions across all pools
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="site-page" id="page-positions">
+    <div class="page-body">
+
+      <div class="stats-grid">
+        <div><div class="stat-label">positions</div><div class="stat-value" id="posPageCount">0</div></div>
+        <div><div class="stat-label">total deposited</div><div class="stat-value" id="posPageDeposited">0 SOL</div></div>
+        <div><div class="stat-label">total harvested</div><div class="stat-value green" id="posPageHarvested">0 SOL</div></div>
+        <div><div class="stat-label">avg fill</div><div class="stat-value" id="posPageAvgFill">0%</div></div>
+      </div>
+
+      <div class="pos-page-header"><span>pool</span><span>side</span><span>range</span><span>filled</span><span>amount</span><span>status</span></div>
+      <div id="allPositionsList"><div class="empty-state">connect wallet to view positions</div></div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       PAGE 3: RANK — feed your monke, claim SOL
        Sub-pages: Monke (personal) + Roster (leaderboard)
        ═══════════════════════════════════════════════════════════ -->
   <div class="site-page" id="page-rank">
@@ -285,19 +289,48 @@
 
       <!-- Sub-page: MONKE (personal) -->
       <div class="sub-content active" data-sub="monke">
-        <div class="stats-grid">
-          <div><div class="stat-label">bananas balance</div><div class="stat-value bananas" id="bananasBalance">0</div></div>
-          <div><div class="stat-label">your weight</div><div class="stat-value" id="userTotalWeight">0</div></div>
-          <div><div class="stat-label">claimable</div><div class="stat-value green" id="userClaimable">0 SOL</div></div>
-          <div><div class="stat-label">total claimed</div><div class="stat-value" id="userTotalClaimed">0 SOL</div></div>
-        </div>
+        <div class="monke-frame">
+          <div class="monke-frame-corner tl"></div>
+          <div class="monke-frame-corner tr"></div>
+          <div class="monke-frame-corner bl"></div>
+          <div class="monke-frame-corner br"></div>
 
-        <div class="monke-actions-bar">
-          <button class="action-btn-sm" id="claimAllBtn">claim all</button>
-        </div>
+          <div class="monke-split">
+            <!-- LEFT: NFT selector -->
+            <div class="monke-nft-panel">
+              <div class="stat-label" style="margin-bottom:12px;">your monkes</div>
+              <div class="nft-grid" id="nftGrid">
+                <div class="empty-state" style="padding:20px;">connect wallet</div>
+              </div>
+              <div class="nft-selected-info" id="nftSelectedInfo" style="display:none;">
+                <div class="nft-selected-name" id="nftSelectedName">—</div>
+                <div class="nft-selected-gen" id="nftSelectedGen">—</div>
+              </div>
+            </div>
 
-        <div class="monke-header"><span>monke</span><span>gen</span><span>weight</span><span>claimable</span><span></span></div>
-        <div id="monkeList"><div class="empty-state">connect wallet to view your monkes</div></div>
+            <div class="monke-frame-divider"></div>
+
+            <!-- RIGHT: Stats + actions -->
+            <div class="monke-detail-panel">
+              <div class="stats-grid stats-grid-2">
+                <div><div class="stat-label">bananas balance</div><div class="stat-value bananas" id="bananasBalance">0</div></div>
+                <div><div class="stat-label">your weight</div><div class="stat-value" id="userTotalWeight">0</div></div>
+                <div><div class="stat-label">claimable</div><div class="stat-value green" id="userClaimable">0 SOL</div></div>
+                <div><div class="stat-label">total claimed</div><div class="stat-value" id="userTotalClaimed">0 SOL</div></div>
+                <div><div class="stat-label">total fees earned</div><div class="stat-value" id="userTotalFees">0 SOL</div></div>
+                <div><div class="stat-label">your share</div><div class="stat-value" id="userRewardShare">0%</div></div>
+              </div>
+
+              <div class="monke-actions-bar">
+                <button class="action-btn-sm" id="feedMonkeBtn">feed 1M $BANANAS</button>
+                <button class="action-btn-sm" id="claimAllBtn">claim all</button>
+              </div>
+
+              <div class="monke-header"><span>monke</span><span>gen</span><span>weight</span><span>claimable</span><span></span></div>
+              <div id="monkeList"><div class="empty-state">connect wallet to view your monkes</div></div>
+            </div>
+          </div>
+        </div>
 
         <div class="jupiter-embed-section" id="jupiterSection">
           <div id="jupiter-terminal"></div>
@@ -327,30 +360,33 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       PAGE 3: OPS — the war room
+       PAGE 4: OPS — the war room
        Activity feed + bounty board + permissionless crank
        ═══════════════════════════════════════════════════════════ -->
   <div class="site-page" id="page-ops">
     <div class="page-body">
 
-      <div class="stats-grid">
-        <div><div class="stat-label">positions watched</div><div class="stat-value" id="opsPositionCount">0</div></div>
-        <div><div class="stat-label">pending harvests</div><div class="stat-value" id="opsPendingCount">0</div></div>
-        <div><div class="stat-label">total harvested</div><div class="stat-value green" id="opsTotalHarvested">0 SOL</div></div>
-        <div><div class="stat-label">bot status</div><div class="stat-value" id="opsBotStatus">offline</div></div>
-      </div>
-
-      <!-- Permissionless crank buttons -->
-      <div class="crank-section">
-        <button class="action-btn-sm" id="crankSweep">sweep rover</button>
-        <button class="action-btn-sm" id="crankDistribute">distribute</button>
-        <button class="action-btn-sm" id="crankDeposit">deposit sol</button>
-        <button class="action-btn-sm" id="crankCompost">compost</button>
+      <div class="ops-top-row">
+        <div class="ops-stats-compact">
+          <span class="stat-label">watched</span> <span class="stat-value-inline" id="opsPositionCount">0</span>
+          <span class="ops-sep">·</span>
+          <span class="stat-label">pending</span> <span class="stat-value-inline" id="opsPendingCount">0</span>
+          <span class="ops-sep">·</span>
+          <span class="stat-label">harvested</span> <span class="stat-value-inline green" id="opsTotalHarvested">0 SOL</span>
+          <span class="ops-sep">·</span>
+          <span class="stat-label">bot</span> <span class="stat-value-inline" id="opsBotStatus">offline</span>
+        </div>
+        <div class="crank-section">
+          <button class="action-btn-sm" id="crankSweep">sweep</button>
+          <button class="action-btn-sm" id="crankDistribute">distribute</button>
+          <button class="action-btn-sm" id="crankDeposit">deposit</button>
+          <button class="action-btn-sm" id="crankCompost">compost</button>
+        </div>
       </div>
 
       <!-- Bounty board -->
-      <div class="bounty-header"><span>pool</span><span>bins ready</span><span>est. reward</span><span>stale</span><span></span></div>
-      <div id="bountyBoard"><div class="empty-state">no pending harvests</div></div>
+      <div class="bounty-header"><span>pool</span><span>bins</span><span>reward</span><span>stale</span><span></span></div>
+      <div id="bountyBoard"><div class="empty-state" style="padding:16px;">no pending harvests</div></div>
       <div class="bounty-actions">
         <button class="action-btn-sm" id="harvestAllBtn">harvest all</button>
       </div>
@@ -358,14 +394,14 @@
       <!-- Live activity feed -->
       <div class="feed-label">live feed</div>
       <div class="activity-feed" id="activityFeed">
-        <div class="empty-state">connecting to laserstream...</div>
+        <div class="empty-state" style="padding:12px;">connecting to laserstream...</div>
       </div>
 
     </div>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       PAGE 4: RECON — token intelligence / rover TVL leaderboard
+       PAGE 5: RECON — token intelligence / rover TVL leaderboard
        ═══════════════════════════════════════════════════════════ -->
   <div class="site-page" id="page-recon">
     <div class="page-body">
@@ -398,19 +434,21 @@
   <!-- GLOBAL: SIGIL NAVIGATOR — the astrolabe (5 orbits) -->
   <div class="sigil-nav" id="sigilNav">
     <svg viewBox="0 0 200 120" preserveAspectRatio="xMidYMax meet">
-      <ellipse class="sigil-orbit" data-page="0" cx="100" cy="10" rx="94" ry="54" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <ellipse class="sigil-orbit" data-page="1" cx="100" cy="10" rx="82" ry="47" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <ellipse class="sigil-orbit" data-page="2" cx="100" cy="8" rx="68" ry="40" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <ellipse class="sigil-orbit" data-page="3" cx="100" cy="6" rx="54" ry="32" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <ellipse class="sigil-orbit" data-page="4" cx="100" cy="10" rx="40" ry="22" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <circle class="sigil-dot" data-page="0" cx="100" cy="64" r="2.5" fill="var(--faint)"/>
-      <circle class="sigil-dot" data-page="1" cx="100" cy="57" r="2.5" fill="var(--faint)"/>
-      <circle class="sigil-dot" data-page="2" cx="100" cy="48" r="2.5" fill="var(--faint)"/>
-      <circle class="sigil-dot" data-page="3" cx="100" cy="38" r="2.5" fill="var(--faint)"/>
-      <circle class="sigil-dot" data-page="4" cx="100" cy="32" r="2.5" fill="var(--faint)"/>
+      <ellipse class="sigil-orbit" data-page="0" cx="100" cy="10" rx="97" ry="57" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <ellipse class="sigil-orbit" data-page="1" cx="100" cy="10" rx="87" ry="51" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <ellipse class="sigil-orbit" data-page="2" cx="100" cy="10" rx="77" ry="45" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <ellipse class="sigil-orbit" data-page="3" cx="100" cy="8" rx="66" ry="38" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <ellipse class="sigil-orbit" data-page="4" cx="100" cy="6" rx="54" ry="31" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <ellipse class="sigil-orbit" data-page="5" cx="100" cy="10" rx="40" ry="22" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <circle class="sigil-dot" data-page="0" cx="100" cy="67" r="2.5" fill="var(--faint)"/>
+      <circle class="sigil-dot" data-page="1" cx="100" cy="61" r="2.5" fill="var(--faint)"/>
+      <circle class="sigil-dot" data-page="2" cx="100" cy="55" r="2.5" fill="var(--faint)"/>
+      <circle class="sigil-dot" data-page="3" cx="100" cy="46" r="2.5" fill="var(--faint)"/>
+      <circle class="sigil-dot" data-page="4" cx="100" cy="37" r="2.5" fill="var(--faint)"/>
+      <circle class="sigil-dot" data-page="5" cx="100" cy="32" r="2.5" fill="var(--faint)"/>
       <circle cx="100" cy="10" r="4" fill="none" stroke="var(--scaffold)" stroke-width="1"/>
       <circle cx="100" cy="10" r="1.5" fill="var(--scaffold)"/>
-      <line x1="100" y1="14" x2="100" y2="74" stroke="var(--scaffold)" stroke-width="0.75"/>
+      <line x1="100" y1="14" x2="100" y2="77" stroke="var(--scaffold)" stroke-width="0.75"/>
     </svg>
     <div class="nav-arrow left" id="navLeft"><svg width="40" height="56" viewBox="0 0 40 56"><path d="M 18 28 Q 24 26, 34 18 Q 28 28, 34 38 Q 24 30, 18 28 Z" fill="var(--scaffold)"/></svg></div>
     <div class="nav-arrow right" id="navRight"><svg width="40" height="56" viewBox="0 0 40 56"><path d="M 22 28 Q 16 26, 6 18 Q 12 28, 6 38 Q 16 30, 22 28 Z" fill="var(--scaffold)"/></svg></div>
@@ -436,6 +474,36 @@
       <div class="modal-actions">
         <button class="action-btn-sm claim-now" id="warningClaimBtn">claim now</button>
         <button class="action-btn-sm" id="warningDismissBtn">continue anyway</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="enlistHelpModal">
+    <div class="codec">
+      <div class="codec-scanlines"></div>
+      <div class="codec-header">
+        <span class="codec-freq">141.12</span>
+        <span class="codec-label">fair launch</span>
+        <button class="codec-close" id="enlistHelpClose">&times;</button>
+      </div>
+      <div class="codec-body">
+        <div class="codec-portrait">
+          <img src="monke.png" alt="monke">
+          <div class="codec-name">monke</div>
+        </div>
+        <div class="codec-dialogue">
+          <p>monke.army uses <a href="https://docs.meteora.ag/anti-sniper-suite/alpha-vault/what-is-alpha-vault" target="_blank" rel="noopener" style="color:var(--mint);text-decoration:none;">Meteora DAMM v2 Alpha Vault</a> for a fair launch.</p>
+          <p>1. Deposit SOL.</p>
+          <p>2. March 1st 00:00:00 UTC — Claim your $BANANAS.</p>
+          <p>3. Pro-Rata: everyone gets the same price.</p>
+          <p>4. Alpha Vault purchases up to 420 SOL off the DAMM v2 curve.</p>
+          <p>5. Any deposits above 420 SOL are refunded to your wallet.</p>
+          <p>6. Burn $BANANAS to your <a href="https://magiceden.us/marketplace/solana_monkey_business" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">SMB Gen2</a> or <a href="https://magiceden.us/marketplace/smb_gen3" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">SMB Gen3</a> Monke to earn fees.</p>
+          <br>
+          <p class="codec-accent">100% of fees from trade volume and strategies are returned to monke.</p>
+          <hr style="border:none;border-top:1px solid rgba(58,90,40,0.4);margin:12px 0;">
+          <p><a href="https://jup.ag/tokens/ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">$BANANAS</a> || CA: ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w</p>
+        </div>
       </div>
     </div>
   </div>

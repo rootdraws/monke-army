@@ -1,14 +1,16 @@
 /**
  * enlist.js — Alpha Vault SDK integration for the Enlist page.
  *
- * Bundled via esbuild (src/enlist.js → dist/enlist.bundle.js).
+ * Bundled via esbuild (src/enlist.js → public/enlist.bundle.js).
  * Manages three phases: countdown, deposit, claim.
  *
- * Dependencies: @meteora-ag/alpha-vault, @solana/web3.js (from CDN global)
+ * Dependencies: @meteora-ag/alpha-vault, @solana/web3.js, @coral-xyz/anchor (BN)
  */
 
-import AlphaVault from '@meteora-ag/alpha-vault';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import AlphaVault, { deriveEscrow, getOrCreateATAInstruction, unwrapSOLInstruction } from '@meteora-ag/alpha-vault';
+import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
+import { NATIVE_MINT } from '@solana/spl-token';
+import { BN } from '@coral-xyz/anchor';
 
 // Read config from the global CONFIG object set by app.js,
 // or fall back to fetching config.json directly
@@ -118,7 +120,7 @@ function updateCountdown() {
 // ═══ VAULT INTERACTION ═══
 
 async function initVault(config) {
-  const rpcUrl = config.RPC_URL || 'https://api.mainnet-beta.solana.com';
+  const rpcUrl = config.HELIUS_RPC_URL || config.RPC_URL || 'https://api.mainnet-beta.solana.com';
   enlistState.connection = new Connection(rpcUrl, 'confirmed');
 
   const vaultAddr = config.ALPHA_VAULT_ADDRESS;
@@ -130,7 +132,22 @@ async function initVault(config) {
   try {
     enlistState.vaultAddress = new PublicKey(vaultAddr);
     enlistState.vault = await AlphaVault.create(enlistState.connection, enlistState.vaultAddress);
+
+    // Read activation point from vault (BN → seconds)
+    if (enlistState.vault.activationPoint) {
+      enlistState.activationPoint = enlistState.vault.activationPoint.toNumber();
+    }
+
+    // Read max buying cap from vault state
+    if (enlistState.vault.vault?.maxBuyingCap) {
+      enlistState.maxBuyingCap = enlistState.vault.vault.maxBuyingCap.toNumber() / LAMPORTS_PER_SOL;
+    }
+
+    // Store bananas mint from config for Phase 3
+    enlistState.bananasMint = config.BANANAS_MINT || '';
+
     console.log('[enlist] Alpha Vault loaded:', vaultAddr);
+    console.log('[enlist] activationPoint:', enlistState.activationPoint, 'maxBuyingCap:', enlistState.maxBuyingCap, 'SOL');
   } catch (err) {
     console.warn('[enlist] Failed to load Alpha Vault:', err.message);
   }
@@ -140,9 +157,10 @@ async function fetchVaultStats() {
   if (!enlistState.vault) return;
 
   try {
-    // Refresh vault state
-    const vaultState = enlistState.vault;
-    const totalDeposit = vaultState.vault?.totalDeposit?.toNumber?.() || 0;
+    // Refresh vault state from chain
+    await enlistState.vault.refreshState();
+
+    const totalDeposit = enlistState.vault.vault?.totalDeposit?.toNumber?.() || 0;
     enlistState.totalDeposit = totalDeposit;
 
     const totalSol = (totalDeposit / LAMPORTS_PER_SOL).toFixed(2);
@@ -150,7 +168,16 @@ async function fetchVaultStats() {
     if (el('enlistTotalDeposited')) el('enlistTotalDeposited').textContent = `${totalSol} SOL`;
     if (el('enlistCapacity')) el('enlistCapacity').textContent = `${totalSol} / ${enlistState.maxBuyingCap} SOL`;
 
-    // User deposit (if wallet connected)
+    // Re-check phase after refresh (vault state may have changed)
+    detectPhase();
+
+    // Update curve estimates
+    const totalSolNum = totalDeposit / LAMPORTS_PER_SOL;
+    if (window.updateEnlistEstimates) {
+      window.updateEnlistEstimates(totalSolNum, enlistState.userDeposit / LAMPORTS_PER_SOL);
+    }
+
+    // User deposit + claim info (if wallet connected)
     await fetchUserDeposit();
   } catch (err) {
     console.warn('[enlist] Stats fetch error:', err.message);
@@ -179,25 +206,84 @@ async function fetchUserDeposit() {
         if (el('enlistAllocation')) el('enlistAllocation').textContent = `${pct}%`;
       }
 
-      // Show withdraw button if user has deposit
+      // Phase 2: show withdraw button if user has deposit
       const withdrawBtn = document.getElementById('enlistWithdrawBtn');
       if (withdrawBtn) withdrawBtn.style.display = deposit > 0 ? '' : 'none';
+
+      // Phase 3: show refund button if deposits exceeded cap
+      const refundBtn = document.getElementById('enlistRefundBtn');
+      if (refundBtn && enlistState.totalDeposit > enlistState.maxBuyingCap * LAMPORTS_PER_SOL) {
+        refundBtn.style.display = '';
+      }
+
+      // Refresh curve estimates with updated user deposit
+      if (window.updateEnlistEstimates && enlistState.totalDeposit > 0) {
+        window.updateEnlistEstimates(
+          enlistState.totalDeposit / LAMPORTS_PER_SOL,
+          deposit / LAMPORTS_PER_SOL
+        );
+      }
+
+      // Phase 3: claim info (how many $BANANAS the user is allocated)
+      const claimInfo = enlistState.vault.getClaimInfo(escrow);
+      if (claimInfo && claimInfo.totalAllocated) {
+        const allocated = claimInfo.totalAllocated.toNumber?.() || 0;
+        const claimed = claimInfo.totalClaimed.toNumber?.() || 0;
+        const claimable = claimInfo.totalClaimable.toNumber?.() || 0;
+        // $BANANAS has 6 decimals
+        const allocatedDisplay = (allocated / 1e6).toLocaleString();
+        const claimableDisplay = (claimable / 1e6).toLocaleString();
+        if (el('enlistBananasBalance')) {
+          el('enlistBananasBalance').textContent = claimed > 0
+            ? `${claimableDisplay} claimable`
+            : allocatedDisplay;
+        }
+      }
     }
   } catch {
     // No escrow = no deposit yet
   }
 }
 
+async function fetchBananasBalance() {
+  const wallet = getWallet();
+  if (!wallet || !enlistState.connection || !enlistState.bananasMint) return;
+
+  try {
+    const mint = new PublicKey(enlistState.bananasMint);
+    const ata = PublicKey.findProgramAddressSync(
+      [wallet.toBuffer(), new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA').toBuffer(), mint.toBuffer()],
+      new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+    )[0];
+    const balance = await enlistState.connection.getTokenAccountBalance(ata);
+    if (balance?.value?.uiAmount !== null) {
+      const el = document.getElementById('enlistBananasBalance');
+      if (el) el.textContent = Number(balance.value.uiAmount).toLocaleString();
+    }
+  } catch {
+    // No ATA = no balance yet
+  }
+}
+
 function getWallet() {
-  // Read from app.js global state
-  if (window.solana?.publicKey) return window.solana.publicKey;
+  // Read from app.js state bridge (supports Phantom, Solflare, Backpack)
+  if (window.__monkeWallet?.publicKey) return window.__monkeWallet.publicKey;
+  // Fallback to direct provider checks
   if (window.phantom?.solana?.publicKey) return window.phantom.solana.publicKey;
+  if (window.solana?.publicKey) return window.solana.publicKey;
+  if (window.solflare?.publicKey) return window.solflare.publicKey;
+  if (window.backpack?.publicKey) return window.backpack.publicKey;
   return null;
 }
 
-async function getWalletAdapter() {
-  if (window.phantom?.solana) return window.phantom.solana;
-  if (window.solana) return window.solana;
+function getWalletAdapter() {
+  // Read from app.js state bridge
+  if (window.__monkeWallet?.adapter) return window.__monkeWallet.adapter;
+  // Fallback to direct provider checks
+  if (window.phantom?.solana?.isConnected) return window.phantom.solana;
+  if (window.solana?.isConnected) return window.solana;
+  if (window.solflare?.isConnected) return window.solflare;
+  if (window.backpack?.isConnected) return window.backpack;
   return null;
 }
 
@@ -222,87 +308,173 @@ async function handleDeposit() {
 
   const amount = parseFloat(input.value);
   if (!amount || amount <= 0) {
-    showToast('enter a valid SOL amount');
+    showToast('enter a valid SOL amount', 'error');
     return;
   }
 
-  const wallet = await getWalletAdapter();
+  const wallet = getWalletAdapter();
   if (!wallet) {
-    showToast('connect your wallet first');
+    showToast('connect your wallet first', 'error');
     return;
   }
 
   if (!enlistState.vault) {
-    showToast('vault not loaded — check config');
+    showToast('vault not loaded — check config', 'error');
     return;
   }
 
+  const btn = document.getElementById('enlistDepositBtn');
+  const originalText = btn?.textContent;
+  if (btn) { btn.textContent = 'depositing...'; btn.disabled = true; }
+
   try {
-    const depositTx = await enlistState.vault.deposit(
-      wallet.publicKey,
-      BigInt(Math.floor(amount * LAMPORTS_PER_SOL))
-    );
+    const lamports = new BN(Math.floor(amount * LAMPORTS_PER_SOL));
+    const depositTx = await enlistState.vault.deposit(lamports, wallet.publicKey);
     const signed = await wallet.signTransaction(depositTx);
     const sig = await enlistState.connection.sendRawTransaction(signed.serialize());
     await enlistState.connection.confirmTransaction(sig, 'confirmed');
 
-    showToast(`deposited ${amount} SOL`);
+    showToast(`deposited ${amount} SOL — solscan.io/tx/${sig}`, 'success');
     input.value = '';
     await fetchVaultStats();
     await updateWalletBalance();
   } catch (err) {
     console.error('[enlist] Deposit error:', err);
-    showToast(`deposit failed: ${err.message?.slice(0, 60)}`);
+    showToast(`deposit failed: ${err.message?.slice(0, 80)}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = originalText; btn.disabled = false; }
   }
 }
 
 // ═══ WITHDRAW / CLAIM ═══
 
 async function handleWithdraw() {
-  const wallet = await getWalletAdapter();
+  const wallet = getWalletAdapter();
   if (!wallet || !enlistState.vault) return;
 
+  const btn = document.getElementById('enlistWithdrawBtn');
+  const originalText = btn?.textContent;
+  if (btn) { btn.textContent = 'reading escrow...'; btn.disabled = true; }
+
   try {
-    const withdrawTx = await enlistState.vault.withdraw(
-      wallet.publicKey,
-      BigInt(enlistState.userDeposit)
-    );
-    const signed = await wallet.signTransaction(withdrawTx);
+    const escrowAccount = await enlistState.vault.getEscrow(wallet.publicKey);
+    const onChainDeposit = escrowAccount?.totalDeposit?.toNumber?.() || 0;
+    if (onChainDeposit <= 0) {
+      showToast('nothing to withdraw', 'error');
+      return;
+    }
+
+    if (btn) btn.textContent = 'withdrawing...';
+    const amount = new BN(onChainDeposit);
+    const av = enlistState.vault;
+    const owner = wallet.publicKey;
+
+    // Build withdraw TX manually — the SDK's withdraw() has a bug that wraps
+    // the withdrawal amount FROM the user's wallet before the vault transfers.
+    // We skip the wrap and only include the unwrap (vault → WSOL ATA → SOL).
+    const [escrow] = deriveEscrow(av.pubkey, owner, av.program.programId);
+    const { ataPubKey: destinationToken, ix: createDestinationTokenIx } =
+      await getOrCreateATAInstruction(
+        av.program.provider.connection,
+        av.vault.quoteMint, owner, owner,
+        av.quoteMintInfo.tokenProgram
+      );
+
+    const preInstructions = [];
+    if (createDestinationTokenIx) preInstructions.push(createDestinationTokenIx);
+
+    const postInstructions = [];
+    if (av.vault.quoteMint.equals(NATIVE_MINT)) {
+      postInstructions.push(unwrapSOLInstruction(owner));
+    }
+
+    const withdrawIx = await av.program.methods.withdraw(amount).accountsPartial({
+      vault: av.pubkey,
+      destinationToken,
+      escrow,
+      owner,
+      pool: av.vault.pool,
+      tokenVault: av.vault.tokenVault,
+      tokenMint: av.vault.quoteMint,
+      tokenProgram: av.quoteMintInfo.tokenProgram,
+    }).preInstructions(preInstructions).postInstructions(postInstructions).transaction();
+
+    const { blockhash, lastValidBlockHeight } =
+      await enlistState.connection.getLatestBlockhash('confirmed');
+    const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: owner }).add(withdrawIx);
+
+    const signed = await wallet.signTransaction(tx);
     const sig = await enlistState.connection.sendRawTransaction(signed.serialize());
     await enlistState.connection.confirmTransaction(sig, 'confirmed');
 
-    showToast('withdrawal complete');
+    showToast(`withdrawal complete — solscan.io/tx/${sig}`, 'success');
     await fetchVaultStats();
     await updateWalletBalance();
   } catch (err) {
     console.error('[enlist] Withdraw error:', err);
-    showToast(`withdraw failed: ${err.message?.slice(0, 60)}`);
+    showToast(`withdraw failed: ${err.message?.slice(0, 80)}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = originalText; btn.disabled = false; }
   }
 }
 
 async function handleClaim() {
-  const wallet = await getWalletAdapter();
+  const wallet = getWalletAdapter();
   if (!wallet || !enlistState.vault) return;
 
+  const btn = document.getElementById('enlistClaimBtn');
+  const originalText = btn?.textContent;
+  if (btn) { btn.textContent = 'claiming...'; btn.disabled = true; }
+
   try {
-    const claimTx = await enlistState.vault.withdraw(wallet.publicKey, BigInt(0));
+    const claimTx = await enlistState.vault.claimToken(wallet.publicKey);
     const signed = await wallet.signTransaction(claimTx);
     const sig = await enlistState.connection.sendRawTransaction(signed.serialize());
     await enlistState.connection.confirmTransaction(sig, 'confirmed');
 
-    showToast('$BANANAS claimed!');
+    showToast(`$BANANAS claimed! — solscan.io/tx/${sig}`, 'success');
     await fetchVaultStats();
+    await fetchBananasBalance();
   } catch (err) {
     console.error('[enlist] Claim error:', err);
-    showToast(`claim failed: ${err.message?.slice(0, 60)}`);
+    showToast(`claim failed: ${err.message?.slice(0, 80)}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = originalText; btn.disabled = false; }
+  }
+}
+
+// ═══ REFUND (excess SOL when deposits > cap) ═══
+
+async function handleRefund() {
+  const wallet = getWalletAdapter();
+  if (!wallet || !enlistState.vault) return;
+
+  const btn = document.getElementById('enlistRefundBtn');
+  const originalText = btn?.textContent;
+  if (btn) { btn.textContent = 'withdrawing...'; btn.disabled = true; }
+
+  try {
+    const refundTx = await enlistState.vault.withdrawRemainingQuote(wallet.publicKey);
+    const signed = await wallet.signTransaction(refundTx);
+    const sig = await enlistState.connection.sendRawTransaction(signed.serialize());
+    await enlistState.connection.confirmTransaction(sig, 'confirmed');
+
+    showToast(`excess SOL withdrawn — solscan.io/tx/${sig}`, 'success');
+    await fetchVaultStats();
+    await updateWalletBalance();
+  } catch (err) {
+    console.error('[enlist] Refund error:', err);
+    showToast(`refund failed: ${err.message?.slice(0, 80)}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = originalText; btn.disabled = false; }
   }
 }
 
 // ═══ TOAST (reuse app.js toast if available) ═══
 
-function showToast(msg) {
+function showToast(msg, type) {
   if (window.showToast) {
-    window.showToast(msg);
+    window.showToast(msg, type);
     return;
   }
   console.log('[enlist]', msg);
@@ -324,53 +496,87 @@ async function handleMax() {
   }
 }
 
+// ═══ $BANANAS ADDRESS DISPLAY ═══
+
+function displayBananasAddress() {
+  const el = document.getElementById('enlistBananasAddress');
+  if (!el || !enlistState.bananasMint) return;
+
+  const mint = enlistState.bananasMint;
+  const short = mint.slice(0, 6) + '...' + mint.slice(-4);
+  el.innerHTML = `<a href="https://solscan.io/token/${mint}" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">${short}</a>`;
+  el.title = mint;
+  el.style.cursor = 'pointer';
+  el.addEventListener('click', (e) => {
+    if (e.target.tagName === 'A') return;
+    navigator.clipboard.writeText(mint).then(() => showToast('address copied', 'info'));
+  });
+}
+
+// ═══ WALLET CHANGE LISTENER ═══
+
+function onWalletChanged() {
+  fetchVaultStats();
+  updateWalletBalance();
+  if (enlistState.phase === 'claim') fetchBananasBalance();
+}
+
 // ═══ INIT ═══
 
 async function initEnlist() {
-  const config = await getConfig();
-
-  // Read timing from config
-  enlistState.depositOpensAt = config.DEPOSIT_OPENS_AT || 0;
-  // activationPoint will come from vault state once loaded, or estimate from config
-  enlistState.maxBuyingCap = 420;
-
-  // Initialize vault connection
-  await initVault(config);
-
-  // Detect initial phase
-  detectPhase();
-
-  // Start countdown
-  enlistState.countdownInterval = setInterval(() => {
-    updateCountdown();
-  }, 1000);
-
-  // Start stats polling (every 30s)
-  enlistState.statsInterval = setInterval(() => {
-    if (enlistState.phase === 'deposit' || enlistState.phase === 'claim') {
-      fetchVaultStats();
-      updateWalletBalance();
-    }
-  }, 30000);
-
-  // Wire up buttons
+  // Wire up buttons FIRST — before any async work that could fail/hang
   document.getElementById('enlistDepositBtn')?.addEventListener('click', handleDeposit);
   document.getElementById('enlistWithdrawBtn')?.addEventListener('click', handleWithdraw);
   document.getElementById('enlistClaimBtn')?.addEventListener('click', handleClaim);
+  document.getElementById('enlistRefundBtn')?.addEventListener('click', handleRefund);
   document.getElementById('enlistMaxBtn')?.addEventListener('click', handleMax);
 
-  // Initial data fetch
-  if (enlistState.vault) {
-    await fetchVaultStats();
+  // Listen for wallet connection changes from all providers
+  const providers = [
+    window.phantom?.solana,
+    window.solana,
+    window.solflare,
+    window.backpack,
+  ].filter(Boolean);
+  const seen = new Set();
+  for (const provider of providers) {
+    if (seen.has(provider)) continue;
+    seen.add(provider);
+    try { provider.on('connect', onWalletChanged); } catch {}
+    try { provider.on('disconnect', onWalletChanged); } catch {}
   }
-  await updateWalletBalance();
+  window.addEventListener('monke:walletChanged', onWalletChanged);
 
-  // Listen for wallet connection changes
-  if (window.phantom?.solana) {
-    window.phantom.solana.on('connect', () => {
-      fetchVaultStats();
-      updateWalletBalance();
-    });
+  // Now do async init — if this fails, buttons still work (show toast errors)
+  try {
+    const config = await getConfig();
+    enlistState.depositOpensAt = config.DEPOSIT_OPENS_AT || 0;
+
+    await initVault(config);
+    detectPhase();
+    displayBananasAddress();
+
+    // Start countdown
+    enlistState.countdownInterval = setInterval(() => {
+      updateCountdown();
+    }, 1000);
+
+    // Start stats polling (every 30s)
+    enlistState.statsInterval = setInterval(() => {
+      if (enlistState.phase === 'deposit' || enlistState.phase === 'claim') {
+        fetchVaultStats();
+        updateWalletBalance();
+      }
+    }, 30000);
+
+    // Initial data fetch
+    if (enlistState.vault) {
+      await fetchVaultStats();
+    }
+    await updateWalletBalance();
+  } catch (err) {
+    console.error('[enlist] Init failed:', err);
+    showToast('vault initialization failed — check console', 'error');
   }
 
   console.log('[enlist] initialized — phase:', enlistState.phase);
