@@ -137,7 +137,7 @@ Existing order form (left wing) + positions list (right wing). Mock data replace
 
 - `loadPool()` calls `GET /api/pools/{address}` (fallback: direct RPC)
 - WebSocket `activeBinChanged` updates price in real-time
-- Position creation via Anchor CPI (blocked by deployed programs)
+- Position creation live: V1 `open_position` (SPL pools) + V2 `open_position_v2` (Token-2022 pools). Auto-detects from LbPair program flags.
 - Featured pools loaded from Recon data
 
 ---
@@ -205,7 +205,7 @@ esbuild                        # Bundle SDK imports + minify
 All 5 pages have HTML scaffolding, styles, and JS event wiring. What's real vs stubbed:
 
 - **Enlist:** Fully wired to Alpha Vault SDK. 3-phase UI complete. `ALPHA_VAULT_ADDRESS` + `DEPOSIT_OPENS_AT` set in `config.json`.
-- **Trade:** Pool loading works via relay REST. WebSocket price updates work. Position creation has demo mode (simulated) with production path commented out. Close is stubbed.
+- **Trade:** Pool loading works via relay REST + direct RPC fallback. WebSocket price updates work. Position creation live (V1 SPL + V2 Token-2022, first mainnet position Feb 21). Close wired via `user_close` (untested). Positions list reads on-chain via `getProgramAccounts`. Demo mode removed.
 - **Rank:** Monke sub-page has stats grid + NFT list placeholder + claim/feed buttons (all stubbed). Roster has leaderboard + MonkeBurn lookup (stubbed). Jupiter Terminal embed placeholder exists.
 - **Ops:** Activity feed wired to relay WebSocket (works live). Stats grid, bounty board, and crank buttons all stubbed with "requires deployed programs" toasts.
 - **Recon:** Stats grid, rover leaderboard, top-5 cards, bribe deposit form — all HTML exists, all JS stubbed.
@@ -245,4 +245,4 @@ bot/
 
 ---
 
-*Last updated: Feb 16, 2026. Enlist page built (page 0, 3-phase Alpha Vault SDK). Splitter gutted. 5-page nav. Audit fixes applied. Programs deployed + initialized on mainnet. Pool + Alpha Vault live. All addresses in config.json + bot/.env. See TODO.md for build sequencing.*
+*Last updated: Feb 21, 2026. Trade page: position creation live (V1 + V2 Token-2022), close wired, positions list on-chain, demo mode removed. See refactor.md for technical debt. See TODO.md for remaining items.*

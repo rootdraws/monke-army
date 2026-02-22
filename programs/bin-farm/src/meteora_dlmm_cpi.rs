@@ -54,6 +54,7 @@ pub mod disc {
     pub const CLOSE_POSITION: [u8; 8]                = [0x7b, 0x86, 0x51, 0x00, 0x31, 0x44, 0x62, 0x62];
     pub const CLOSE_POSITION_IF_EMPTY: [u8; 8]       = [0x3b, 0x7c, 0xd4, 0x76, 0x5b, 0x98, 0x6e, 0x9d];
     pub const INITIALIZE_BIN_ARRAY: [u8; 8]          = [0x23, 0x56, 0x13, 0xb9, 0x4e, 0xd4, 0x4b, 0xd3];
+    pub const ADD_LIQ_BY_STRATEGY2: [u8; 8]          = [0x03, 0xdd, 0x95, 0xda, 0x6f, 0x8d, 0x76, 0xd5];
     pub const REMOVE_LIQ_BY_RANGE2: [u8; 8]         = [0xcc, 0x02, 0xc3, 0x91, 0x35, 0x91, 0x91, 0xcd];
     pub const CLAIM_FEE2: [u8; 8]                    = [0x70, 0xbf, 0x65, 0xab, 0x1c, 0x90, 0x7f, 0xbb];
     pub const CLOSE_POSITION2: [u8; 8]               = [0xae, 0x5a, 0x23, 0x73, 0xba, 0x28, 0x93, 0xe2];
@@ -104,11 +105,29 @@ impl StrategyParameters {
             parameteres: [0u8; 64],
         }
     }
+
+    pub fn spot_imbalanced(min_bin_id: i32, max_bin_id: i32) -> Self {
+        Self {
+            min_bin_id,
+            max_bin_id,
+            strategy_type: StrategyType::SpotImBalanced,
+            parameteres: [0u8; 64],
+        }
+    }
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct LiquidityParameterByStrategyOneSide {
     pub amount: u64,
+    pub active_id: i32,
+    pub max_active_bin_slippage: i32,
+    pub strategy_parameters: StrategyParameters,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct LiquidityParameterByStrategy {
+    pub amount_x: u64,
+    pub amount_y: u64,
     pub active_id: i32,
     pub max_active_bin_slippage: i32,
     pub strategy_parameters: StrategyParameters,
@@ -136,6 +155,15 @@ pub struct RemainingAccountsInfo {
 
 impl RemainingAccountsInfo {
     pub fn none() -> Self { Self { slices: vec![] } }
+
+    pub fn empty_hooks() -> Self {
+        Self {
+            slices: vec![
+                RemainingAccountsSlice { accounts_type: AccountsType::TransferHookX, length: 0 },
+                RemainingAccountsSlice { accounts_type: AccountsType::TransferHookY, length: 0 },
+            ],
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -158,6 +186,18 @@ pub fn bin_id_to_array_index(bin_id: i32) -> i64 {
         (bin_id / BINS_PER_ARRAY) as i64
     } else {
         ((bin_id - (BINS_PER_ARRAY - 1)) / BINS_PER_ARRAY) as i64
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn bitmap_meta(account: &AccountInfo) -> AccountMeta {
+    if account.is_writable {
+        AccountMeta::new(account.key(), false)
+    } else {
+        AccountMeta::new_readonly(account.key(), false)
     }
 }
 
@@ -195,7 +235,7 @@ pub fn initialize_position<'info>(
     Ok(())
 }
 
-/// Accounts: position(m), lb_pair(m), bitmap_ext(m), user_token(m), reserve(m),
+/// Accounts: position(m), lb_pair(m), bitmap_ext(optional,m), user_token(m), reserve(m),
 ///           token_mint, bin_lower(m), bin_upper(m), sender(s), token_prog, event_auth, program
 pub fn add_liquidity_by_strategy_one_side<'info>(
     accounts: &[AccountInfo<'info>; 12],
@@ -211,7 +251,7 @@ pub fn add_liquidity_by_strategy_one_side<'info>(
         accounts: vec![
             AccountMeta::new(accounts[0].key(), false),            // position
             AccountMeta::new(accounts[1].key(), false),            // lb_pair
-            AccountMeta::new(accounts[2].key(), false),            // bitmap_ext
+            bitmap_meta(&accounts[2]),                              // bitmap_ext (program ID = None)
             AccountMeta::new(accounts[3].key(), false),            // user_token
             AccountMeta::new(accounts[4].key(), false),            // reserve
             AccountMeta::new_readonly(accounts[5].key(), false),   // token_mint
@@ -225,6 +265,46 @@ pub fn add_liquidity_by_strategy_one_side<'info>(
         data,
     };
     invoke_signed(&ix, accounts, signer_seeds)?;
+    Ok(())
+}
+
+/// V2 add liquidity (Token-2022 compatible). Two-sided params, separate token programs.
+/// Fixed accounts (14): position(m), lb_pair(m), bitmap_ext(opt), user_token_x(m), user_token_y(m),
+///   reserve_x(m), reserve_y(m), token_x_mint, token_y_mint, sender(s),
+///   token_x_prog, token_y_prog, event_auth, program
+/// + remaining_accounts for bin arrays
+pub fn add_liquidity_by_strategy2<'info>(
+    accounts: &[AccountInfo<'info>; 14],
+    params: LiquidityParameterByStrategy,
+    remaining_accounts_info: RemainingAccountsInfo,
+    signer_seeds: &[&[&[u8]]],
+    remaining_accounts: &[AccountInfo<'info>],
+) -> Result<()> {
+    let mut data = Vec::with_capacity(120);
+    data.extend_from_slice(&disc::ADD_LIQ_BY_STRATEGY2);
+    params.serialize(&mut data)?;
+    remaining_accounts_info.serialize(&mut data)?;
+
+    let mut metas = vec![
+        AccountMeta::new(accounts[0].key(), false),            // position
+        AccountMeta::new(accounts[1].key(), false),            // lb_pair
+        bitmap_meta(&accounts[2]),                              // bitmap_ext (optional)
+        AccountMeta::new(accounts[3].key(), false),            // user_token_x
+        AccountMeta::new(accounts[4].key(), false),            // user_token_y
+        AccountMeta::new(accounts[5].key(), false),            // reserve_x
+        AccountMeta::new(accounts[6].key(), false),            // reserve_y
+        AccountMeta::new_readonly(accounts[7].key(), false),   // token_x_mint
+        AccountMeta::new_readonly(accounts[8].key(), false),   // token_y_mint
+        AccountMeta::new_readonly(accounts[9].key(), true),    // sender
+        AccountMeta::new_readonly(accounts[10].key(), false),  // token_x_program
+        AccountMeta::new_readonly(accounts[11].key(), false),  // token_y_program
+        AccountMeta::new_readonly(accounts[12].key(), false),  // event_authority
+        AccountMeta::new_readonly(accounts[13].key(), false),  // program
+    ];
+    for a in remaining_accounts { metas.push(AccountMeta::new(a.key(), false)); }
+    let mut all: Vec<AccountInfo<'info>> = accounts.to_vec();
+    all.extend_from_slice(remaining_accounts);
+    invoke_signed(&Instruction { program_id: METEORA_DLMM_PROGRAM_ID, accounts: metas, data }, &all, signer_seeds)?;
     Ok(())
 }
 
@@ -249,7 +329,7 @@ pub fn remove_liquidity_by_range<'info>(
         accounts: vec![
             AccountMeta::new(accounts[0].key(), false),            // position
             AccountMeta::new(accounts[1].key(), false),            // lb_pair
-            AccountMeta::new(accounts[2].key(), false),            // bitmap_ext
+            bitmap_meta(&accounts[2]),                              // bitmap_ext
             AccountMeta::new(accounts[3].key(), false),            // user_token_x
             AccountMeta::new(accounts[4].key(), false),            // user_token_y
             AccountMeta::new(accounts[5].key(), false),            // reserve_x
@@ -280,7 +360,7 @@ pub fn remove_all_liquidity<'info>(
         accounts: vec![
             AccountMeta::new(accounts[0].key(), false),
             AccountMeta::new(accounts[1].key(), false),
-            AccountMeta::new(accounts[2].key(), false),
+            bitmap_meta(&accounts[2]),
             AccountMeta::new(accounts[3].key(), false),
             AccountMeta::new(accounts[4].key(), false),
             AccountMeta::new(accounts[5].key(), false),
@@ -429,7 +509,7 @@ pub fn remove_liquidity_by_range2<'info>(
     let mut metas = vec![
         AccountMeta::new(accounts[0].key(), false),
         AccountMeta::new(accounts[1].key(), false),
-        AccountMeta::new(accounts[2].key(), false),
+        bitmap_meta(&accounts[2]),
         AccountMeta::new(accounts[3].key(), false),
         AccountMeta::new(accounts[4].key(), false),
         AccountMeta::new(accounts[5].key(), false),

@@ -35,7 +35,7 @@ Two on-chain programs. No governance. No staking. No voting.
 programs/                        — Anchor workspace (build targets)
   bin-farm/src/
     lib.rs                       — core.rs (positions, harvest, close, fees, ROVER)
-    meteora_dlmm_cpi.rs          — CPI module (V1 + V2 + BidAskOneSide)
+    meteora_dlmm_cpi.rs          — CPI module (V1 + V2 + BidAskOneSide + add_liquidity_by_strategy2)
   monke-bananas/src/lib.rs       — monke_bananas.rs
 
 src/contracts/                   — Reference copies (keep in sync with programs/)
@@ -65,6 +65,8 @@ scripts/
 meteora-invent/                  — Meteora DAMM v2 launch toolkit (cloned)
   studio/config/damm_v2_config.jsonc — $BANANAS pool + Alpha Vault config
 
+refactor.md                      — Technical debt from Feb 21 session (Box<>, remaining_accounts, V2 CPI)
+ref/dlmm-sdk/                    — Cloned Meteora DLMM SDK (source of truth for CPI layouts + discriminators)
 Anchor.toml                      — 2 programs, devnet + mainnet
 ```
 
@@ -124,7 +126,7 @@ $BANANAS launched via Meteora Invent DAMM v2 pool with Alpha Vault pro-rata fair
 
 ## Build
 
-`anchor build --no-idl` (IDL gen skipped — `anchor-syn` incompatible with Rust 1.93). `blake3` pinned to 1.5.5. `init-if-needed` enabled for monke_bananas. `solana-program = "=1.18.26"` for core. No `mpl-token-metadata` dep — raw Metaplex byte parsing.
+`PATH="$HOME/.cargo/bin:$PATH" cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml` (Homebrew cargo doesn't support `+toolchain` — must use rustup cargo). IDL gen skipped (`anchor-syn` incompatible with Rust 1.93). `blake3` pinned to 1.5.5. `init-if-needed` enabled for monke_bananas. `solana-program = "=1.18.26"` for core. No `mpl-token-metadata` dep — raw Metaplex byte parsing.
 
 ## Frontend pages
 
@@ -141,6 +143,33 @@ $BANANAS launched via Meteora Invent DAMM v2 pool with Alpha Vault pro-rata fair
 
 - **$BANANAS decimals: 6** — `BANANAS_PER_FEED = 1_000_000_000_000` is correct.
 - **Token-2022 transfer hooks unsupported** — V1/V2 branching works but transfer hook extra accounts are not resolved.
+- **V1 `open_position` untested post-Box<> changes** — SPL-only pools should work but haven't been smoke-tested on mainnet.
+
+## Critical implementation notes (Feb 21, 2026)
+
+**Do not remove `Box<>` wrappers.** Every `Account<'info, T>` in every instruction struct is `Box`ed to avoid BPF 4KB stack frame overflow. Removing any `Box<>` will cause access violations at runtime. `OpenPositionV2` is at exactly 4096 bytes — one more named `AccountInfo` field will overflow it.
+
+**`OpenPositionV2` remaining_accounts contract (6 accounts, order matters):**
+- `[0]` bin_array_lower (writable)
+- `[1]` bin_array_upper (writable)
+- `[2]` event_authority (read-only)
+- `[3]` dlmm_program (read-only, validated via `require!()` in body)
+- `[4]` token_x_mint (read-only)
+- `[5]` token_y_mint (read-only)
+
+These were moved out of the struct to fit the stack frame. No Anchor validation — Meteora validates bin arrays and event_authority via CPI; dlmm_program checked manually; mints passed through to CPI.
+
+**`open_position_v2` uses `add_liquidity_by_strategy2` (NOT `add_liquidity_by_strategy_one_side`):**
+- Strategy type: `SpotImBalanced` (enum value 6). The two-sided V2 instruction rejects one-sided strategy types.
+- `RemainingAccountsInfo::empty_hooks()` — 2 empty transfer hook slices (TransferHookX + TransferHookY, both length 0). NOT `::none()`.
+- `active_id` parameter: pool's actual active bin from lb_pair bytes, NOT `min_bin_id`.
+- For buy: `amount_x = 0, amount_y = deposit`. For sell: `amount_x = deposit, amount_y = 0`.
+
+**`bitmap_ext` is NOT `#[account(mut)]` in any struct.** Removed globally because the DLMM program ID placeholder (used when no bitmap extension exists) is executable and can't be writable. CPI module uses `bitmap_meta()` helper to conditionally set writable based on `is_writable`.
+
+**Source of truth for Meteora CPI:** `ref/dlmm-sdk/` (cloned from `github.com/MeteoraAg/dlmm-sdk`). Use the IDL at `ref/dlmm-sdk/idls/dlmm.json` and the SDK at `ref/dlmm-sdk/ts-client/src/dlmm/` to verify discriminators, account layouts, and strategy types. Do not guess.
+
+**See `refactor.md`** for full technical debt ledger and the proper fix path (program split, InterfaceAccount, LazyAccount, unified V2).
 
 ## Deployment status (Feb 16, 2026)
 
@@ -162,8 +191,9 @@ $BANANAS launched via Meteora Invent DAMM v2 pool with Alpha Vault pro-rata fair
 ## Next steps
 
 1. Provision bot server, start keeper (Phase 3)
-2. E2E smoke test (full loop with 0.1 SOL)
-3. Wire remaining frontend tx building (Trade, Rank, Ops, Recon) — see `frontend-dev.md`
+2. E2E smoke test: full loop (open → harvest → close → sweep → feed → claim)
+3. Test V1 `open_position` on SPL-only pool
+4. Wire remaining frontend tx building (Rank, Ops, Recon) — see `frontend-dev.md`
 
 ## Reference docs
 
@@ -171,6 +201,7 @@ $BANANAS launched via Meteora Invent DAMM v2 pool with Alpha Vault pro-rata fair
 |-----|---------------|
 | `whitepaper.md` | Product narrative, mechanics, gamma scalping thesis, FAQ |
 | `frontend-dev.md` | Frontend build plan — Enlist/Trade/Rank/Ops/Recon + LaserStream relay |
+| `refactor.md` | Technical debt from Feb 21 session — Box<>, remaining_accounts, V2 CPI, program split plan |
 | `TODO.md` | Deploy checklist + fair launch + funding + audit fixes |
-| `TODO.md` Blockers section | Known blockers and dependencies for frontend + deployment |
+| `frontend-fix.md` | Frontend UX issues (design/layout, not tx building) |
 | `meteora-invent/studio/config/damm_v2_config.jsonc` | DAMM v2 pool + Alpha Vault launch config (executed Feb 16) |

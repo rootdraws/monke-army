@@ -249,8 +249,8 @@ pub mod bin_farm {
     /// Uses unchecked token_program account (validated via constraint) instead of
     /// Program<'info, Token> which only accepts standard SPL Token.
     /// Enables Token-2022 deposits from frontend.
-    pub fn open_position_v2(
-        ctx: Context<OpenPositionV2>,
+    pub fn open_position_v2<'info>(
+        ctx: Context<'_, '_, 'info, 'info, OpenPositionV2<'info>>,
         amount: u64,
         min_bin_id: i32,
         max_bin_id: i32,
@@ -274,17 +274,28 @@ pub mod bin_farm {
         require!(active_id > -443636 && active_id < 443636, CoreError::InvalidBinRange);
         let side = if min_bin_id > active_id { Side::Sell } else { Side::Buy };
 
-        // Transfer deposit to vault (Token-2022 compatible via unchecked token_program)
+        // Determine deposit token program based on side
+        let deposit_token_program = if side == Side::Sell {
+            &ctx.accounts.token_x_program
+        } else {
+            &ctx.accounts.token_y_program
+        };
+
+        // Transfer deposit to vault (Token-2022 compatible via raw invoke)
+        let deposit_vault = if side == Side::Sell {
+            &ctx.accounts.vault_token_x
+        } else {
+            &ctx.accounts.vault_token_y
+        };
         let transfer_ix = anchor_lang::solana_program::instruction::Instruction {
-            program_id: *ctx.accounts.token_program.key,
+            program_id: *deposit_token_program.key,
             accounts: vec![
                 anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.user_token_account.key(), false),
-                anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.vault_token_account.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new(deposit_vault.key(), false),
                 anchor_lang::solana_program::instruction::AccountMeta::new_readonly(ctx.accounts.user.key(), true),
             ],
             data: {
-                // SPL Token transfer instruction: discriminator(1) = 3, amount(8)
-                let mut d = vec![3u8];
+                let mut d = vec![3u8]; // SPL Token transfer discriminator
                 d.extend_from_slice(&amount.to_le_bytes());
                 d
             },
@@ -293,9 +304,9 @@ pub mod bin_farm {
             &transfer_ix,
             &[
                 ctx.accounts.user_token_account.to_account_info(),
-                ctx.accounts.vault_token_account.to_account_info(),
+                deposit_vault.to_account_info(),
                 ctx.accounts.user.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
+                deposit_token_program.to_account_info(),
             ],
         )?;
 
@@ -308,6 +319,18 @@ pub mod bin_farm {
         ];
         let signer = &[vault_seeds];
 
+        // Overflow accounts via remaining_accounts (BPF 4KB stack frame limit)
+        // [0] bin_array_lower, [1] bin_array_upper, [2] event_authority,
+        // [3] dlmm_program, [4] token_x_mint, [5] token_y_mint
+        require!(ctx.remaining_accounts.len() >= 6, CoreError::NoBinsProvided);
+        let bin_array_lower = ctx.remaining_accounts[0].to_account_info();
+        let bin_array_upper = ctx.remaining_accounts[1].to_account_info();
+        let event_authority = ctx.remaining_accounts[2].to_account_info();
+        let dlmm_program = ctx.remaining_accounts[3].to_account_info();
+        require!(dlmm_program.key() == METEORA_DLMM_PROGRAM_ID, CoreError::InvalidProgram);
+        let token_x_mint = ctx.remaining_accounts[4].to_account_info();
+        let token_y_mint = ctx.remaining_accounts[5].to_account_info();
+
         // 1. Initialize Meteora position (vault PDA = owner)
         initialize_position(
             &[
@@ -317,39 +340,46 @@ pub mod bin_farm {
                 ctx.accounts.vault.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
                 ctx.accounts.rent.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                event_authority.to_account_info(),
+                dlmm_program.to_account_info(),
             ],
             min_bin_id,
             width,
             signer,
         )?;
 
-        // 2. Add one-sided liquidity
-        let liquidity_params = LiquidityParameterByStrategyOneSide {
-            amount,
-            active_id: min_bin_id,
+        // 2. Add liquidity via V2 CPI (Token-2022 compatible, two-sided params)
+        // active_id must be the pool's actual active bin (for slippage validation), not min_bin_id
+        let (amount_x, amount_y) = if side == Side::Sell { (amount, 0u64) } else { (0u64, amount) };
+        let liquidity_params = LiquidityParameterByStrategy {
+            amount_x,
+            amount_y,
+            active_id,
             max_active_bin_slippage,
-            strategy_parameters: StrategyParameters::spot_one_side(min_bin_id, max_bin_id),
+            strategy_parameters: StrategyParameters::spot_imbalanced(min_bin_id, max_bin_id),
         };
 
-        add_liquidity_by_strategy_one_side(
+        add_liquidity_by_strategy2(
             &[
                 ctx.accounts.meteora_position.to_account_info(),
                 ctx.accounts.lb_pair.to_account_info(),
                 ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                ctx.accounts.vault_token_account.to_account_info(),
-                ctx.accounts.reserve.to_account_info(),
-                ctx.accounts.token_mint.to_account_info(),
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                token_x_mint.to_account_info(),
+                token_y_mint.to_account_info(),
                 ctx.accounts.vault.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                event_authority.to_account_info(),
+                dlmm_program.to_account_info(),
             ],
             liquidity_params,
+            RemainingAccountsInfo::empty_hooks(),
             signer,
+            &[bin_array_lower, bin_array_upper],
         )?;
 
         // Store position metadata
@@ -2347,9 +2377,8 @@ pub struct OpenPosition<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
-    // config must be mut (open_position writes total_positions + total_volume)
     #[account(mut, seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     // --- Meteora accounts ---
 
@@ -2361,8 +2390,7 @@ pub struct OpenPosition<'info> {
     #[account(mut)]
     pub meteora_position: Signer<'info>,
 
-    /// CHECK: Bitmap extension (pass DLMM program ID if none)
-    #[account(mut)]
+    /// CHECK: Bitmap extension (pass DLMM program ID if none). Not enforced mut — writable only when real account exists.
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
     /// CHECK: Pool reserve for deposit token
@@ -2393,7 +2421,7 @@ pub struct OpenPosition<'info> {
         seeds = [b"position", meteora_position.key().as_ref()],
         bump
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     /// Vault PDA: one per position (NOT per pool)
     #[account(
@@ -2403,22 +2431,22 @@ pub struct OpenPosition<'info> {
         seeds = [b"vault", meteora_position.key().as_ref()],
         bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     #[account(
         mut,
         constraint = user_token_account.owner == user.key() @ CoreError::InvalidTokenOwner,
         constraint = user_token_account.mint == token_mint.key() @ CoreError::InvalidTokenOwner
     )]
-    pub user_token_account: Account<'info, TokenAccount>,
+    pub user_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         constraint = vault_token_account.owner == vault.key() @ CoreError::InvalidTokenOwner,
         constraint = vault_token_account.mint == token_mint.key() @ CoreError::InvalidTokenOwner
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
 
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: Box<Account<'info, Mint>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -2429,7 +2457,8 @@ pub struct OpenPosition<'info> {
 }
 
 /// Token-2022 compatible open_position.
-/// Uses unchecked token_program with constraint instead of Program<'info, Token>.
+/// Uses add_liquidity_by_strategy2 (V2 CPI) which takes both token programs.
+/// Accounts expanded to include both sides (X/Y) for V2 Meteora CPI compatibility.
 #[derive(Accounts)]
 #[instruction(amount: u64, min_bin_id: i32, max_bin_id: i32, side: Side)]
 pub struct OpenPositionV2<'info> {
@@ -2437,7 +2466,7 @@ pub struct OpenPositionV2<'info> {
     pub user: Signer<'info>,
 
     #[account(mut, seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     // --- Meteora accounts ---
 
@@ -2449,28 +2478,19 @@ pub struct OpenPositionV2<'info> {
     #[account(mut)]
     pub meteora_position: Signer<'info>,
 
-    /// CHECK: Bitmap extension (pass DLMM program ID if none)
-    #[account(mut)]
+    /// CHECK: Bitmap extension (pass DLMM program ID if none).
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
-    /// CHECK: Pool reserve for deposit token
+    /// CHECK: Pool reserve X
     #[account(mut)]
-    pub reserve: AccountInfo<'info>,
+    pub reserve_x: AccountInfo<'info>,
 
-    /// CHECK: Bin array lower
+    /// CHECK: Pool reserve Y
     #[account(mut)]
-    pub bin_array_lower: AccountInfo<'info>,
+    pub reserve_y: AccountInfo<'info>,
 
-    /// CHECK: Bin array upper
-    #[account(mut)]
-    pub bin_array_upper: AccountInfo<'info>,
-
-    /// CHECK: Meteora event authority PDA
-    pub event_authority: AccountInfo<'info>,
-
-    /// CHECK: Meteora DLMM program
-    #[account(constraint = dlmm_program.key() == METEORA_DLMM_PROGRAM_ID @ CoreError::InvalidProgram)]
-    pub dlmm_program: AccountInfo<'info>,
+    // bin_array_lower, bin_array_upper, event_authority, and dlmm_program
+    // passed via ctx.remaining_accounts (BPF 4KB frame limit)
 
     // --- monke.army accounts ---
 
@@ -2481,7 +2501,7 @@ pub struct OpenPositionV2<'info> {
         seeds = [b"position", meteora_position.key().as_ref()],
         bump
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     /// Vault PDA: one per position (NOT per pool)
     #[account(
@@ -2491,10 +2511,9 @@ pub struct OpenPositionV2<'info> {
         seeds = [b"vault", meteora_position.key().as_ref()],
         bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
-    /// CHECK: User's token account for deposit (Token-2022 compatible).
-    /// Validate owner matches user (SPL TokenAccount layout: owner at offset 32).
+    /// CHECK: User's deposit token account (Token-2022 compatible).
     #[account(
         mut,
         constraint = {
@@ -2504,25 +2523,38 @@ pub struct OpenPositionV2<'info> {
     )]
     pub user_token_account: AccountInfo<'info>,
 
-    /// CHECK: Vault's token account (Token-2022 compatible).
-    /// Validate owner matches vault AND mint matches token_mint.
-    /// SPL TokenAccount layout: mint at offset 0 (32 bytes), owner at offset 32 (32 bytes).
+    /// CHECK: Vault's token X account. Owner must be vault PDA.
     #[account(
         mut,
         constraint = {
-            let data = vault_token_account.try_borrow_data()?;
-            data.len() >= 64
-                && Pubkey::try_from(&data[0..32]).map_err(|_| CoreError::InvalidTokenOwner)? == token_mint.key()
-                && Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)? == vault.key()
+            let data = vault_token_x.try_borrow_data()?;
+            data.len() >= 64 && Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)? == vault.key()
         } @ CoreError::InvalidTokenOwner
     )]
-    pub vault_token_account: AccountInfo<'info>,
+    pub vault_token_x: AccountInfo<'info>,
 
-    pub token_mint: Account<'info, Mint>,
+    /// CHECK: Vault's token Y account. Owner must be vault PDA.
+    #[account(
+        mut,
+        constraint = {
+            let data = vault_token_y.try_borrow_data()?;
+            data.len() >= 64 && Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)? == vault.key()
+        } @ CoreError::InvalidTokenOwner
+    )]
+    pub vault_token_y: AccountInfo<'info>,
 
-    /// CHECK: Token program — SPL Token or Token-2022
-    #[account(constraint = *token_program.key == anchor_spl::token::ID || *token_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
-    pub token_program: AccountInfo<'info>,
+    // token_x_mint and token_y_mint passed via ctx.remaining_accounts[4] and [5]
+    // (Token-2022 mints are owned by Token-2022 program, not compatible with Account<Mint>)
+
+    /// CHECK: Token X program — SPL Token or Token-2022
+    #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
+    pub token_x_program: AccountInfo<'info>,
+
+    /// CHECK: Token Y program — SPL Token or Token-2022
+    #[account(constraint = *token_y_program.key == anchor_spl::token::ID || *token_y_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
+    pub token_y_program: AccountInfo<'info>,
+
+    // memo_program passed via ctx.remaining_accounts[2] (reduces stack footprint)
 
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -2537,14 +2569,12 @@ pub struct ClosePosition<'info> {
     #[account(mut)]
     pub bot: Signer<'info>,
 
-    // NOTE: config is mut for heartbeat + total_harvested.
-    // Bot authorization moved to instruction body (permissionless close fallback).
     #[account(
         mut,
         seeds = [b"config"],
         bump = config.bump,
     )]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     #[account(
         mut,
@@ -2552,7 +2582,7 @@ pub struct ClosePosition<'info> {
         bump = position.bump,
         close = owner
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         mut,
@@ -2560,7 +2590,7 @@ pub struct ClosePosition<'info> {
         seeds = [b"vault", position.meteora_position.as_ref()],
         bump = vault.bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     /// CHECK: Position owner
     #[account(mut, constraint = owner.key() == position.owner @ CoreError::Unauthorized)]
@@ -2576,8 +2606,7 @@ pub struct ClosePosition<'info> {
     #[account(mut, constraint = lb_pair.key() == position.lb_pair @ CoreError::InvalidPool)]
     pub lb_pair: AccountInfo<'info>,
 
-    /// CHECK: Bitmap ext
-    #[account(mut)]
+    /// CHECK: Bitmap ext — writable only when real account exists
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
     /// CHECK: Bin array lower
@@ -2596,8 +2625,8 @@ pub struct ClosePosition<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Account<'info, Mint>,
-    pub token_y_mint: Account<'info, Mint>,
+    pub token_x_mint: Box<Account<'info, Mint>>,
+    pub token_y_mint: Box<Account<'info, Mint>>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2609,26 +2638,26 @@ pub struct ClosePosition<'info> {
     // --- Token accounts (ownership validated) ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Account<'info, TokenAccount>,
+    pub vault_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Account<'info, TokenAccount>,
+    pub vault_token_y: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = owner_token_x.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_x: Account<'info, TokenAccount>,
+    pub owner_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_y: Account<'info, TokenAccount>,
+    pub owner_token_y: Box<Account<'info, TokenAccount>>,
 
     // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
-    pub rover_authority: Account<'info, RoverAuthority>,
+    pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     #[account(mut, constraint = rover_fee_token_x.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_x: Account<'info, TokenAccount>,
+    pub rover_fee_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_y: Account<'info, TokenAccount>,
+    pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
 
     pub token_program: Program<'info, Token>,
     /// CHECK: Token X program — must be SPL Token or Token-2022
@@ -2657,20 +2686,20 @@ pub struct BotHarvest<'info> {
         seeds = [b"config"],
         bump = config.bump,
     )]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     #[account(
         mut,
         seeds = [b"position", position.meteora_position.as_ref()],
         bump = position.bump,
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         seeds = [b"vault", position.meteora_position.as_ref()],
         bump = vault.bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     /// CHECK: Position owner
     #[account(mut, constraint = owner.key() == position.owner @ CoreError::Unauthorized)]
@@ -2686,8 +2715,7 @@ pub struct BotHarvest<'info> {
     #[account(mut, constraint = lb_pair.key() == position.lb_pair @ CoreError::InvalidPool)]
     pub lb_pair: AccountInfo<'info>,
 
-    /// CHECK: Bitmap ext
-    #[account(mut)]
+    /// CHECK: Bitmap ext — writable only when real account exists
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
     /// CHECK: Bin array lower
@@ -2706,8 +2734,8 @@ pub struct BotHarvest<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Account<'info, Mint>,
-    pub token_y_mint: Account<'info, Mint>,
+    pub token_x_mint: Box<Account<'info, Mint>>,
+    pub token_y_mint: Box<Account<'info, Mint>>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2719,26 +2747,26 @@ pub struct BotHarvest<'info> {
     // --- Token accounts (ownership validated) ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Account<'info, TokenAccount>,
+    pub vault_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Account<'info, TokenAccount>,
+    pub vault_token_y: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = owner_token_x.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_x: Account<'info, TokenAccount>,
+    pub owner_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_y: Account<'info, TokenAccount>,
+    pub owner_token_y: Box<Account<'info, TokenAccount>>,
 
     // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
-    pub rover_authority: Account<'info, RoverAuthority>,
+    pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     #[account(mut, constraint = rover_fee_token_x.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_x: Account<'info, TokenAccount>,
+    pub rover_fee_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_y: Account<'info, TokenAccount>,
+    pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
 
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2758,7 +2786,7 @@ pub struct UserClose<'info> {
     pub user: Signer<'info>,
 
     #[account(mut, seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     #[account(
         mut,
@@ -2767,7 +2795,7 @@ pub struct UserClose<'info> {
         constraint = position.owner == user.key() @ CoreError::Unauthorized,
         close = user
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         mut,
@@ -2775,7 +2803,7 @@ pub struct UserClose<'info> {
         seeds = [b"vault", position.meteora_position.as_ref()],
         bump = vault.bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     // --- Meteora ---
 
@@ -2787,8 +2815,7 @@ pub struct UserClose<'info> {
     #[account(mut, constraint = lb_pair.key() == position.lb_pair @ CoreError::InvalidPool)]
     pub lb_pair: AccountInfo<'info>,
 
-    /// CHECK: Bitmap ext
-    #[account(mut)]
+    /// CHECK: Bitmap ext — writable only when real account exists
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
     /// CHECK: Bin array lower
@@ -2807,8 +2834,8 @@ pub struct UserClose<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Account<'info, Mint>,
-    pub token_y_mint: Account<'info, Mint>,
+    pub token_x_mint: Box<Account<'info, Mint>>,
+    pub token_y_mint: Box<Account<'info, Mint>>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2820,26 +2847,26 @@ pub struct UserClose<'info> {
     // --- Token accounts ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Account<'info, TokenAccount>,
+    pub vault_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Account<'info, TokenAccount>,
+    pub vault_token_y: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = user_token_x.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_x: Account<'info, TokenAccount>,
+    pub user_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = user_token_y.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_y: Account<'info, TokenAccount>,
+    pub user_token_y: Box<Account<'info, TokenAccount>>,
 
     // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
-    pub rover_authority: Account<'info, RoverAuthority>,
+    pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     #[account(mut, constraint = rover_fee_token_x.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_x: Account<'info, TokenAccount>,
+    pub rover_fee_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_y: Account<'info, TokenAccount>,
+    pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
 
     pub token_program: Program<'info, Token>,
     /// CHECK: Token X program — must be SPL Token or Token-2022
@@ -2866,13 +2893,13 @@ pub struct ClaimFees<'info> {
         bump = position.bump,
         constraint = position.owner == user.key() @ CoreError::Unauthorized
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         seeds = [b"vault", position.meteora_position.as_ref()],
         bump = vault.bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     // --- Meteora ---
 
@@ -2900,8 +2927,8 @@ pub struct ClaimFees<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Account<'info, Mint>,
-    pub token_y_mint: Account<'info, Mint>,
+    pub token_x_mint: Box<Account<'info, Mint>>,
+    pub token_y_mint: Box<Account<'info, Mint>>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2913,16 +2940,16 @@ pub struct ClaimFees<'info> {
     // --- Token accounts ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Account<'info, TokenAccount>,
+    pub vault_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Account<'info, TokenAccount>,
+    pub vault_token_y: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = user_token_x.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_x: Account<'info, TokenAccount>,
+    pub user_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = user_token_y.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_y: Account<'info, TokenAccount>,
+    pub user_token_y: Box<Account<'info, TokenAccount>>,
 
     pub token_program: Program<'info, Token>,
     /// CHECK: Token X program — must be SPL Token or Token-2022
@@ -2964,7 +2991,7 @@ pub struct ApplyEmergencyClose<'info> {
     pub caller: Signer<'info>,
 
     #[account(mut, seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     #[account(
         mut,
@@ -2973,7 +3000,7 @@ pub struct ApplyEmergencyClose<'info> {
         bump = position.bump,
         constraint = position.key() == config.pending_emergency_close @ CoreError::InvalidPosition
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         mut,
@@ -2981,23 +3008,23 @@ pub struct ApplyEmergencyClose<'info> {
         seeds = [b"vault", position.meteora_position.as_ref()],
         bump = vault.bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     /// CHECK: Position owner — receives any remaining vault tokens
     #[account(constraint = owner.key() == position.owner @ CoreError::Unauthorized)]
     pub owner: AccountInfo<'info>,
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Account<'info, TokenAccount>,
+    pub vault_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Account<'info, TokenAccount>,
+    pub vault_token_y: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = owner_token_x.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_x: Account<'info, TokenAccount>,
+    pub owner_token_x: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_y: Account<'info, TokenAccount>,
+    pub owner_token_y: Box<Account<'info, TokenAccount>>,
 
     /// CHECK: Token X program
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -3059,14 +3086,14 @@ pub struct OpenRoverPosition<'info> {
     pub depositor: Signer<'info>,
 
     #[account(mut, seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     #[account(
         mut,
         seeds = [b"rover_authority"],
         bump = rover_authority.bump
     )]
-    pub rover_authority: Account<'info, RoverAuthority>,
+    pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     // --- Meteora accounts ---
 
@@ -3078,8 +3105,7 @@ pub struct OpenRoverPosition<'info> {
     #[account(mut)]
     pub meteora_position: Signer<'info>,
 
-    /// CHECK: Bitmap extension
-    #[account(mut)]
+    /// CHECK: Bitmap extension — writable only when real account exists
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
     /// CHECK: Pool reserve for deposit token
@@ -3110,7 +3136,7 @@ pub struct OpenRoverPosition<'info> {
         seeds = [b"position", meteora_position.key().as_ref()],
         bump
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         init,
@@ -3119,21 +3145,21 @@ pub struct OpenRoverPosition<'info> {
         seeds = [b"vault", meteora_position.key().as_ref()],
         bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     #[account(
         mut,
         constraint = depositor_token_account.owner == depositor.key() @ CoreError::InvalidTokenOwner
     )]
-    pub depositor_token_account: Account<'info, TokenAccount>,
+    pub depositor_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(
         mut,
         constraint = vault_token_account.owner == vault.key() @ CoreError::InvalidTokenOwner
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
 
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: Box<Account<'info, Mint>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -3236,10 +3262,10 @@ pub struct OpenFeeRover<'info> {
     pub bot: Signer<'info>,
 
     #[account(mut, seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     #[account(mut, seeds = [b"rover_authority"], bump = rover_authority.bump)]
-    pub rover_authority: Account<'info, RoverAuthority>,
+    pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     // --- Meteora accounts ---
 
@@ -3251,8 +3277,7 @@ pub struct OpenFeeRover<'info> {
     #[account(mut)]
     pub meteora_position: Signer<'info>,
 
-    /// CHECK: Bitmap extension
-    #[account(mut)]
+    /// CHECK: Bitmap extension — writable only when real account exists
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
     /// CHECK: Pool reserve for deposit token
@@ -3277,20 +3302,20 @@ pub struct OpenFeeRover<'info> {
     // --- monke.army accounts ---
 
     #[account(init, payer = bot, space = Position::SIZE, seeds = [b"position", meteora_position.key().as_ref()], bump)]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(init, payer = bot, space = Vault::SIZE, seeds = [b"vault", meteora_position.key().as_ref()], bump)]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     /// Source: rover_authority's token account (accumulated fee tokens)
     #[account(mut, constraint = rover_token_account.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_token_account: Account<'info, TokenAccount>,
+    pub rover_token_account: Box<Account<'info, TokenAccount>>,
 
     /// Destination: per-position vault token account
     #[account(mut, constraint = vault_token_account.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
 
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: Box<Account<'info, Mint>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,

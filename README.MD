@@ -88,7 +88,7 @@ bin-farm/
 ├── programs/                      # Anchor workspace (build targets)
 │   ├── bin-farm/src/
 │   │   ├── lib.rs                 # Core program (positions, harvest, close, fees, rovers)
-│   │   └── meteora_dlmm_cpi.rs   # Meteora DLMM CPI wrappers (V1 + V2 + BidAskOneSide)
+│   │   └── meteora_dlmm_cpi.rs   # Meteora DLMM CPI wrappers (V1 + V2 + BidAskOneSide + add_liquidity_by_strategy2)
 │   └── monke-bananas/src/lib.rs   # Burn $BANANAS, stack weight, claim SOL, compost dead monkes
 ├── src/
 │   ├── contracts/                 # Reference copies (keep in sync with programs/)
@@ -122,16 +122,25 @@ bin-farm/
 ├── Cargo.toml                     # Workspace root
 ├── whitepaper.md                  # Product overview + mechanics
 ├── frontend-dev.md                # Frontend build plan: Enlist/Trade/Rank/Ops/Recon
-└── TODO.md                        # Blockers, checklist, launch prep
+├── refactor.md                    # Technical debt from Feb 21 session (Box<>, remaining_accounts, V2 CPI)
+├── TODO.md                        # Blockers, checklist, launch prep
+└── ref/dlmm-sdk/                  # Cloned Meteora DLMM SDK (source of truth for CPI layouts)
 ```
 
 ## Build & Deploy
 
 ```bash
 npm install
-anchor build --no-idl
 
-# Deploy + initialize atomically (prevents front-running)
+# Build program (Homebrew cargo doesn't support +toolchain — use rustup cargo)
+PATH="$HOME/.cargo/bin:$PATH" cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml
+
+# Deploy / upgrade (upgrade authority required)
+solana program deploy target/deploy/bin_farm.so \
+  --program-id 8FJyoK7UKhYB8qd8187oVWFngQ5ZoVPbNWXSUeZSdgia \
+  --url mainnet-beta
+
+# First-time deploy + initialize atomically (prevents front-running)
 BOT_PUBKEY=<bot-key> BANANAS_MINT=<mint> \
   node scripts/deploy-and-init.mjs --cluster mainnet
 
@@ -164,7 +173,7 @@ Plus: sub-second harvest via LaserStream, permissionless fallback on all operati
 ## Run Frontend
 
 ```bash
-npx serve public                              # dev
+npx vite public                               # dev (HMR)
 npm run build:frontend && npx serve dist      # production
 ```
 

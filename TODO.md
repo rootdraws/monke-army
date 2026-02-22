@@ -2,7 +2,7 @@
 
 ---
 
-**Phase 1 (pool + Alpha Vault) and Phase 2 (programs) completed Feb 16, 2026.** All mainnet addresses in `README.MD`.
+**Phase 1 (pool + Alpha Vault) and Phase 2 (programs) completed Feb 16, 2026.** All mainnet addresses in `CLAUDE.md`.
 
 ---
 
@@ -13,7 +13,6 @@
 - [ ] Validate LaserStream subscription — bin detection, active_id parsing, position tracking
 - [ ] Validate relay server — `http://localhost:8080/api/stats`, WebSocket `/ws` events
 - [ ] Validate Saturday keeper — claim pool fees → unwrap WSOL → sweep → fee rovers → deposit → cleanup
-- [ ] Quick smoke test: open a small position → bot detects → harvests → fee routes correctly
 
 **Unlocks:** Relay serves live data to frontend. Bot cranks permissionless instructions. Full data backbone running.
 
@@ -21,16 +20,15 @@
 
 ## Phase 4 — Frontend (all pages, live transactions)
 
-All 5 pages have HTML + styles + event wiring. Stubs exist in `app.js`. See `frontend-dev.md` for page specs and design constraints.
+All 5 pages have HTML + styles + event wiring. See `frontend-dev.md` for page specs and design constraints.
 
 ### Trade page
-- [ ] Replace demo-mode position creation with live `open_position` tx
-- [ ] Wire positions list to on-chain `position.all()` (falls back to relay REST)
-- [ ] Resolve token symbols from mint addresses in `loadPool()`
-- [ ] Pool selector UX — featured pools from relay, recent pools, paste address
-- [ ] Bin range visualization — bins on a price axis relative to current price
-- [ ] Close position: live `user_close` tx
+- [x] Replace demo-mode position creation with live `open_position` tx *(Feb 21 — V1 for SPL pools, V2 for Token-2022 pools. First mainnet position opened.)*
+- [x] Wire positions list to on-chain `getProgramAccounts` *(Feb 21 — `refreshPositionsList()` with corrected byte offsets)*
+- [x] Close position: live `user_close` tx wired *(Feb 21 — wired but untested on mainnet)*
 - [ ] Claim LP fees button per position
+- [ ] Pool selector UX — featured pools from relay, recent pools, paste address
+- [ ] Bin range visualization improvements
 
 ### Rank page — Monke sub-page
 - [ ] Fetch user's SMB Gen2/Gen3 NFTs via Helius DAS `getAssetsByOwner`
@@ -83,11 +81,14 @@ All 5 pages have HTML + styles + event wiring. Stubs exist in `app.js`. See `fro
 
 ## Phase 6 — End-to-end testing
 
-- [ ] Full loop: open position → bot harvests → fee to rover → sweep to dist_pool → feed monke → claim SOL
+- [x] Open position on mainnet *(Feb 21 — 0.1 SOL buy on Speedrun/SOL Token-2022 pool)*
+- [ ] Full loop: open → bot harvests → fee to rover → sweep to dist_pool → feed monke → claim SOL
+- [ ] Test V1 `open_position` on SPL-only pool *(untested post-Box<> changes)*
+- [ ] Test `user_close` on mainnet
 - [ ] Verify all 5 frontend pages with live data
 - [ ] Test permissionless fallback — stop bot for 60s, harvest as keeper, verify tip
 - [ ] Test emergency close flow (propose → wait 24hr → apply)
-- [ ] Test edge cases: Token-2022 pool, dust positions, empty rover sweep
+- [ ] Test edge cases: dust positions, empty rover sweep
 
 ---
 
@@ -96,7 +97,7 @@ All 5 pages have HTML + styles + event wiring. Stubs exist in `app.js`. See `fro
 - [ ] Deploy frontend to Vercel (or equivalent)
 - [ ] DNS: monke.army → Vercel
 - [ ] Final config.json with production RPC, relay URL, all addresses
-- [ ] Remove demo mode banner (app.js line ~1117)
+- [ ] Remove demo mode banner
 - [ ] Remove Enlist page after Alpha Vault closes (pull `#page-enlist`, revert to 4-page nav)
 
 ---
@@ -106,6 +107,19 @@ All 5 pages have HTML + styles + event wiring. Stubs exist in `app.js`. See `fro
 - [ ] **Rover TVL computation** — callback wired to relay, dollar-value computation stubbed. Implement DLMM bin value queries.
 - [ ] **Token-2022 transfer hook support** — documented limitation. Deferred post-launch.
 - [ ] **Remove Enlist page** — after Alpha Vault closes, pull `#page-enlist` from HTML, revert to 4-page nav.
+
+---
+
+## Technical Debt — Feb 21 session
+
+See `refactor.md` for full details.
+
+- [ ] **Program split** — core.rs is at 3440 lines and hitting BPF 4KB stack frame limits. Split rover system into a separate program.
+- [ ] **Reduce remaining_accounts** — `OpenPositionV2` has 6 accounts in `remaining_accounts` with no Anchor validation. Use `InterfaceAccount<Mint>` for mints, `LazyAccount` (Anchor 0.31) for deferred deserialization, or program split to free stack space.
+- [ ] **Unify V1/V2 open_position** — use `add_liquidity_by_strategy2` for all pools (SPL-only pools work fine with V2). Eliminates frontend V1/V2 branching.
+- [ ] **Smoke test V1 path** — `open_position` (SPL-only) untested on mainnet after `Box<>` changes.
+- [ ] **IDL regeneration** — IDL is stale after `OpenPositionV2` struct expansion + new CPI types. Regenerate for client codegen.
+- [ ] **Freeze program upgrades** — 8 deploys in one session. Transfer upgrade authority to multisig or hardware wallet once stable.
 
 ---
 
@@ -125,28 +139,12 @@ All 5 pages have HTML + styles + event wiring. Stubs exist in `app.js`. See `fro
 - [ ] **Rover framing template** — One paragraph for token projects announcing rover deposits. Include in Recon page.
 - [ ] **Secure program upgrade authority** — Hardware wallet for upgrade authority keypair. Plan for freezing (immutable) once stable.
 - [ ] **Participate in Alpha Vault** — buy alongside everyone else. Same price, same terms.
-- [ ] **Smoke test the full loop with 0.1 SOL** — Open position → bot harvests → fee to rover_authority → Saturday keeper sweeps to dist_pool → feed monke → claim SOL.
 - [ ] **Demo Pitch to 5 SMBv2 Holders associated with LP Army**
-
----
-
-## Audit Fixes — Feb 16
-
-- [x] **H-01: Side validation** — `side` derived from on-chain `active_id` in `open_position` + `open_position_v2`. User parameter ignored. Prevents fee evasion.
-- [x] **H-02: Emergency close deadlock** — `apply_emergency_close` now transfers vault tokens to owner as part of closing. No separate drain step, no catch-22 on deprecated pools.
-- [x] **M-01: Rover ATA validation** — `claim_pool_fees` validates `remaining_accounts[7]` and `[8]` are owned by `rover_authority`. Prevents fee redirection.
-- [x] **M-02: Hardcode DAMM v2 discriminator** — `claim_position_fee` discriminator hardcoded. No runtime hash, no Anchor convention assumption.
-- [x] **M-03: Mint constraint** — `user_token_account` in `OpenPosition` v1 now validates mint matches `token_mint`.
-- [x] **IDL regenerated** — `bin_farm.json` regenerated and copied to `bot/idl/`.
-- [x] **AUDIT comments stripped** — ~140 dangling audit references removed across 18 files. Technical context preserved.
-- [x] **Bot: verify-active-id-offset.mjs** — Fixed hardcoded offset (168 → 76).
-- [x] **Bot: safetyPoll cache** — Uses shared `getDLMM` 10-minute cache instead of fresh `DLMM.create()`.
-- [x] **Config: DEFAULT_POOL** — Cleared (was DLMM program ID, not a pool). `HELIUS_RPC_URL` added.
-- [ ] **Token-2022 transfer hooks unsupported** — Documented as known limitation. Full support deferred post-launch.
-- [ ] **Initialize not gated to deployer** — Mitigated via `scripts/deploy-and-init.mjs`. On-chain gating not added.
 
 ---
 
 **IDL regeneration:** `cargo update -p proc-macro2 --precise 1.0.94` then `RUSTUP_TOOLCHAIN=nightly-2024-11-01 anchor idl build -p <program> -o target/idl/<program>.json`
 
-*Last updated: Feb 16, 2026. Audit fixes applied. IDL regenerated. 7-phase plan: pool → programs → bot local → frontend → bot server → E2E → go live.*
+**Build:** `PATH="$HOME/.cargo/bin:$PATH" cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml` (Homebrew cargo doesn't support +toolchain)
+
+*Last updated: Feb 21, 2026. First mainnet position opened. V2 Token-2022 CPI added. See `refactor.md` for technical debt from this session.*

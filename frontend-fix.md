@@ -10,13 +10,14 @@ The Enlist page is about bringing capital into the Fair Launch.
 - I think that the right to withdraw from the pool, is not really that important. If people want to withdraw, they can do so - but, the point is that the tokens are going to be airdropped to your wallet in X days, so deposit your sol, and just commit to it. 
 - I also want to know exactly how the fair launch mechanic works -- like, currently is all 50% of supply going to me, because i am the only buyer? It's a bit of a weird question. So, I need to better understand that. 
 - I don't know what the point is of the monke icon -- it's a brand, and if it's a brand, then why is it clickable? etc. 
-- navigational endbpoints. So basically, the enlist page is on the far left side of the side scroll - which means, that you should have a ' . ' instead of a ' < ' because there is no where to go to the left. This is a minimum requirement, because on the other sites, there is not really any room for nametags on the pages in the current stucture. 
+- navigational endpoints. So basically, the enlist page is on the far left side of the side scroll - which means, that you should have a ' . ' instead of a ' < ' because there is no where to go to the left. This is a minimum requirement, because on the other sites, there is not really any room for nametags on the pages in the current stucture. 
 - Honestly, i'd just remove the monkey and the circle from the top left -- on all pages. Because. it's fucking distracting, and it doesn't do anything. 
 
 # TRADE 
 
 - I think that we ought to make this even more minimal, which is around 70 bins. -- basically like 1-5 bins above, or below the current bin, and then 70 bins from there. That would be this minimum viable expression, which is all about slight profit, and slight accumulation. more of a tight range.  you can modify this, but eventually, there is more that can be done. 
-- The Buy and Sell tokens are fucked - you need to fix it. 
+- The Buy and Sell tokens are fucked - you need to fix it.
+  > Note (Feb 21): The underlying tx building for buy/sell now works (V1 SPL + V2 Token-2022). This item likely refers to the visual/UX of the buy/sell toggle or token labels, not the transaction path.
 - I think that we need to consider the actual bin representations in the main trade view. There ought to be some kind of thing. 
 
 # YOUR MONKE

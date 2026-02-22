@@ -213,14 +213,14 @@ function getConfigPDA() {
 
 function getPositionPDA(meteoraPosition) {
   return solanaWeb3.PublicKey.findProgramAddressSync(
-    [new TextEncoder().encode('position'), meteoraPosition.toBuffer()],
+    [new TextEncoder().encode('position'), meteoraPosition.toBytes()],
     new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID)
   );
 }
 
 function getVaultPDA(meteoraPosition) {
   return solanaWeb3.PublicKey.findProgramAddressSync(
-    [new TextEncoder().encode('vault'), meteoraPosition.toBuffer()],
+    [new TextEncoder().encode('vault'), meteoraPosition.toBytes()],
     new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID)
   );
 }
@@ -242,7 +242,7 @@ function getMonkeStatePDA() {
 
 function getMonkeBurnPDA(nftMint) {
   return solanaWeb3.PublicKey.findProgramAddressSync(
-    [new TextEncoder().encode('monke_burn'), nftMint.toBuffer()],
+    [new TextEncoder().encode('monke_burn'), nftMint.toBytes()],
     new solanaWeb3.PublicKey(CONFIG.MONKE_BANANAS_PROGRAM_ID)
   );
 }
@@ -259,6 +259,226 @@ function getProgramVaultPDA() {
     [new TextEncoder().encode('program_vault')],
     new solanaWeb3.PublicKey(CONFIG.MONKE_BANANAS_PROGRAM_ID)
   );
+}
+
+/** Token program constants */
+const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const TOKEN_2022_PROGRAM_ID = new solanaWeb3.PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+const SPL_MEMO_PROGRAM_ID = new solanaWeb3.PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+const SYSVAR_RENT_PUBKEY = new solanaWeb3.PublicKey('SysvarRent111111111111111111111111111111111');
+const NATIVE_MINT = new solanaWeb3.PublicKey('So11111111111111111111111111111111111111112');
+
+/** Derive Associated Token Address (pure PDA, no SDK needed) */
+function getAssociatedTokenAddressSync(mint, owner, allowOwnerOffCurve = false, tokenProgramId = TOKEN_PROGRAM_ID) {
+  const [ata] = solanaWeb3.PublicKey.findProgramAddressSync(
+    [owner.toBytes(), tokenProgramId.toBytes(), mint.toBytes()],
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  return ata;
+}
+
+/** Build create-ATA instruction */
+function createAssociatedTokenAccountIx(payer, ata, owner, mint, tokenProgramId = TOKEN_PROGRAM_ID) {
+  return new solanaWeb3.TransactionInstruction({
+    programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: ata, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: false, isWritable: false },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: solanaWeb3.SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: tokenProgramId, isSigner: false, isWritable: false },
+    ],
+    data: new Uint8Array(0),
+  });
+}
+
+/** Anchor discriminator: first 8 bytes of sha256("global:<name>") */
+async function getAnchorDiscriminator(instructionName) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`global:${instructionName}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return new Uint8Array(hashBuffer).slice(0, 8);
+}
+
+/** Serialize open_position / open_position_v2 instruction data */
+async function serializeOpenPositionIx(amount, minBinId, maxBinId, side, maxSlippage, instructionName) {
+  const disc = await getAnchorDiscriminator(instructionName);
+  const buf = new ArrayBuffer(21);
+  const view = new DataView(buf);
+  const amountBig = BigInt(amount.toString());
+  view.setBigUint64(0, amountBig, true);
+  view.setInt32(8, minBinId, true);
+  view.setInt32(12, maxBinId, true);
+  view.setUint8(16, side === 'buy' ? 0 : 1);
+  view.setInt32(17, maxSlippage, true);
+  const args = new Uint8Array(buf);
+  const result = new Uint8Array(disc.length + args.length);
+  result.set(disc, 0);
+  result.set(args, disc.length);
+  return result;
+}
+
+/** Serialize a no-arg instruction (user_close, claim_fees) */
+async function serializeNoArgsIx(instructionName) {
+  return getAnchorDiscriminator(instructionName);
+}
+
+/** SPL Token SyncNative instruction (index 17) — syncs WSOL ATA balance after SOL transfer */
+function createSyncNativeIx(nativeAccount) {
+  return new solanaWeb3.TransactionInstruction({
+    programId: TOKEN_PROGRAM_ID,
+    keys: [{ pubkey: nativeAccount, isSigner: false, isWritable: true }],
+    data: new Uint8Array([17]),
+  });
+}
+
+/** Build SystemProgram transfer without Buffer dependency */
+function buildSystemTransferIx(from, to, lamports) {
+  const amount = typeof lamports === 'bigint' ? lamports : BigInt(lamports);
+  const data = new Uint8Array(12);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 2, true); // transfer instruction index = 2
+  view.setBigUint64(4, amount, true);
+  return new solanaWeb3.TransactionInstruction({
+    programId: solanaWeb3.SystemProgram.programId,
+    keys: [
+      { pubkey: from, isSigner: true, isWritable: true },
+      { pubkey: to, isSigner: false, isWritable: true },
+    ],
+    data,
+  });
+}
+
+/** Wrap SOL: transfer lamports to WSOL ATA + sync native */
+function buildWrapSolIxs(from, wsolAta, lamports) {
+  return [
+    buildSystemTransferIx(from, wsolAta, lamports),
+    createSyncNativeIx(wsolAta),
+  ];
+}
+
+/** Derive Meteora bin array PDA */
+function deriveBinArrayPDA(lbPairPubkey, arrayIndex, dlmmProgramId) {
+  const buf = new ArrayBuffer(8);
+  new DataView(buf).setBigInt64(0, BigInt(arrayIndex), true);
+  const [pda] = solanaWeb3.PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode('bin_array'), lbPairPubkey.toBytes(), new Uint8Array(buf)],
+    dlmmProgramId
+  );
+  return pda;
+}
+
+/** Derive Meteora event authority PDA */
+function deriveEventAuthorityPDA(dlmmProgramId) {
+  const [pda] = solanaWeb3.PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode('__event_authority')],
+    dlmmProgramId
+  );
+  return pda;
+}
+
+/** Derive Meteora bin array bitmap extension PDA */
+function deriveBitmapExtPDA(lbPairPubkey, dlmmProgramId) {
+  const [pda] = solanaWeb3.PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode('bitmap'), lbPairPubkey.toBytes()],
+    dlmmProgramId
+  );
+  return pda;
+}
+
+/** Compute bin array index from bin ID (matches Meteora SDK binIdToBinArrayIndex) */
+function binIdToBinArrayIndex(binId) {
+  return Math.floor(binId / 70);
+}
+
+/**
+ * Build Meteora initializeBinArray instruction.
+ * Discriminator from IDL: [35, 86, 19, 185, 78, 212, 75, 211]
+ */
+function buildInitBinArrayIx(lbPairPubkey, binArrayPDA, funderPubkey, arrayIndex, dlmmProgramId) {
+  const disc = new Uint8Array([35, 86, 19, 185, 78, 212, 75, 211]);
+  const argBuf = new ArrayBuffer(8);
+  new DataView(argBuf).setBigInt64(0, BigInt(arrayIndex), true);
+  const data = new Uint8Array(disc.length + 8);
+  data.set(disc, 0);
+  data.set(new Uint8Array(argBuf), disc.length);
+
+  return new solanaWeb3.TransactionInstruction({
+    programId: dlmmProgramId,
+    keys: [
+      { pubkey: lbPairPubkey, isSigner: false, isWritable: false },
+      { pubkey: binArrayPDA, isSigner: false, isWritable: true },
+      { pubkey: funderPubkey, isSigner: true, isWritable: true },
+      { pubkey: solanaWeb3.SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
+}
+
+/**
+ * Check bin arrays for the given range and return init instructions for any missing ones.
+ */
+async function ensureBinArraysExist(lbPairPubkey, minBinId, maxBinId, funder, dlmmProgramId) {
+  const conn = state.connection;
+  const indices = new Set();
+  indices.add(binIdToBinArrayIndex(minBinId));
+  indices.add(binIdToBinArrayIndex(maxBinId));
+  const sorted = [...indices].sort((a, b) => a - b);
+
+  const ixs = [];
+  for (const idx of sorted) {
+    const pda = deriveBinArrayPDA(lbPairPubkey, idx, dlmmProgramId);
+    const info = await conn.getAccountInfo(pda);
+    if (!info) {
+      ixs.push(buildInitBinArrayIx(lbPairPubkey, pda, funder, idx, dlmmProgramId));
+    }
+  }
+  return ixs;
+}
+
+/**
+ * Resolve all Meteora CPI accounts needed for open_position.
+ * Reads LbPair on-chain for reserves/mints/program flags.
+ */
+async function resolveMeteoraCPIAccounts(poolAddress, minBinId, maxBinId) {
+  const lbPairPubkey = new solanaWeb3.PublicKey(poolAddress);
+  const dlmmProgramId = new solanaWeb3.PublicKey(METEORA_DLMM_PROGRAM);
+  const conn = state.connection;
+
+  const pool = await parseLbPairFull(poolAddress);
+
+  const lowerIdx = binIdToBinArrayIndex(minBinId);
+  const upperIdx = binIdToBinArrayIndex(maxBinId);
+  const binArrayLower = deriveBinArrayPDA(lbPairPubkey, lowerIdx, dlmmProgramId);
+  const binArrayUpper = deriveBinArrayPDA(lbPairPubkey, upperIdx, dlmmProgramId);
+
+  const eventAuthority = deriveEventAuthorityPDA(dlmmProgramId);
+
+  const bitmapExtPDA = deriveBitmapExtPDA(lbPairPubkey, dlmmProgramId);
+  let binArrayBitmapExt;
+  try {
+    const bitmapInfo = await conn.getAccountInfo(bitmapExtPDA);
+    binArrayBitmapExt = bitmapInfo ? bitmapExtPDA : dlmmProgramId;
+  } catch {
+    binArrayBitmapExt = dlmmProgramId;
+  }
+
+  return {
+    lbPair: lbPairPubkey,
+    binArrayBitmapExt,
+    binArrayLower,
+    binArrayUpper,
+    reserveX: pool.reserveX,
+    reserveY: pool.reserveY,
+    tokenXMint: pool.tokenXMint,
+    tokenYMint: pool.tokenYMint,
+    eventAuthority,
+    dlmmProgram: dlmmProgramId,
+    tokenXProgramId: pool.tokenXProgramFlag === 1 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID,
+    tokenYProgramId: pool.tokenYProgramFlag === 1 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID,
+  };
 }
 
 /** Fill percent */
@@ -313,6 +533,10 @@ const state = {
   currentPrice: null,
   tokenXSymbol: 'TOKEN',
   tokenYSymbol: 'SOL',
+  tokenXMint: null,
+  tokenYMint: null,
+  tokenXDecimals: 9,
+  tokenYDecimals: 9,
 
   // Side
   side: 'buy',
@@ -559,7 +783,7 @@ async function connectWallet(walletId) {
     }
 
     showToast(`Connected via ${w.name}`, 'success');
-    updatePositionsList();
+    refreshPositionsList();
     renderMonkeList();
     updateEnlistBalance();
     updateFee();
@@ -614,6 +838,10 @@ const LBPAIR_OFFSETS = {
   BIN_STEP: 80,        // u16
   TOKEN_X_MINT: 88,    // pubkey (32 bytes)
   TOKEN_Y_MINT: 120,   // pubkey (32 bytes)
+  RESERVE_X: 152,      // pubkey (32 bytes)
+  RESERVE_Y: 184,      // pubkey (32 bytes)
+  TOKEN_X_PROG_FLAG: 880, // u8 (0=SPL, 1=Token-2022)
+  TOKEN_Y_PROG_FLAG: 881, // u8
 };
 
 const KNOWN_TOKENS = {
@@ -651,6 +879,25 @@ async function parseLbPair(address) {
   const tokenYMint = new solanaWeb3.PublicKey(data.slice(LBPAIR_OFFSETS.TOKEN_Y_MINT, LBPAIR_OFFSETS.TOKEN_Y_MINT + 32));
 
   return { activeId, binStep, tokenXMint, tokenYMint };
+}
+
+async function parseLbPairFull(address) {
+  const conn = state.connection || new solanaWeb3.Connection(CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL, 'confirmed');
+  const pubkey = new solanaWeb3.PublicKey(address);
+  const accountInfo = await conn.getAccountInfo(pubkey);
+  if (!accountInfo) throw new Error('Account not found');
+  if (accountInfo.data.length !== LBPAIR_EXPECTED_SIZE) throw new Error('Not a DLMM pool');
+  const data = accountInfo.data;
+  return {
+    activeId: data.readInt32LE(LBPAIR_OFFSETS.ACTIVE_ID),
+    binStep: data.readUInt16LE(LBPAIR_OFFSETS.BIN_STEP),
+    tokenXMint: new solanaWeb3.PublicKey(data.slice(LBPAIR_OFFSETS.TOKEN_X_MINT, LBPAIR_OFFSETS.TOKEN_X_MINT + 32)),
+    tokenYMint: new solanaWeb3.PublicKey(data.slice(LBPAIR_OFFSETS.TOKEN_Y_MINT, LBPAIR_OFFSETS.TOKEN_Y_MINT + 32)),
+    reserveX: new solanaWeb3.PublicKey(data.slice(LBPAIR_OFFSETS.RESERVE_X, LBPAIR_OFFSETS.RESERVE_X + 32)),
+    reserveY: new solanaWeb3.PublicKey(data.slice(LBPAIR_OFFSETS.RESERVE_Y, LBPAIR_OFFSETS.RESERVE_Y + 32)),
+    tokenXProgramFlag: data.readUInt8(LBPAIR_OFFSETS.TOKEN_X_PROG_FLAG),
+    tokenYProgramFlag: data.readUInt8(LBPAIR_OFFSETS.TOKEN_Y_PROG_FLAG),
+  };
 }
 
 async function resolveTokenSymbol(mintPubkey) {
@@ -699,6 +946,15 @@ async function loadPool() {
       state.currentPrice = binToPrice(relayData.activeId, relayData.binStep);
       state.tokenXSymbol = relayData.tokenXSymbol || 'TOKEN';
       state.tokenYSymbol = relayData.tokenYSymbol || 'SOL';
+      // Relay may not carry mints — fill from on-chain if missing
+      if (relayData.tokenXMint) {
+        state.tokenXMint = relayData.tokenXMint;
+        state.tokenYMint = relayData.tokenYMint;
+      } else {
+        const poolData = await parseLbPairFull(addr);
+        state.tokenXMint = poolData.tokenXMint.toBase58();
+        state.tokenYMint = poolData.tokenYMint.toBase58();
+      }
     } else {
       // Fallback: direct RPC — parse raw lb_pair account bytes
       const pool = await parseLbPair(addr);
@@ -717,6 +973,16 @@ async function loadPool() {
       state.tokenYMint = pool.tokenYMint.toBase58();
     }
 
+    // Fetch decimals for deposit amount calculation
+    if (state.tokenXMint && state.connection) {
+      const [dX, dY] = await Promise.all([
+        getMintDecimals(state.tokenXMint),
+        getMintDecimals(state.tokenYMint),
+      ]);
+      state.tokenXDecimals = dX;
+      state.tokenYDecimals = dY;
+    }
+
     document.getElementById('poolName').textContent = `${state.tokenXSymbol}/${state.tokenYSymbol}`;
     document.getElementById('currentPrice').textContent = '$' + formatPrice(state.currentPrice);
     document.getElementById('poolInfo').classList.add('visible');
@@ -724,6 +990,7 @@ async function loadPool() {
     updateSide(state.side);
     showToast('Pool loaded', 'success');
     loadBinVizData();
+    if (state.connected) refreshPositionsList();
   } catch (err) {
     console.error('Failed to load pool:', err);
     showToast(err.message, 'error');
@@ -869,11 +1136,14 @@ async function fetchUserPositions(poolAddress) {
 
     return accounts.map(({ pubkey, account }) => {
       const data = account.data;
-      const side = data.readUInt8(72) === 0 ? 'buy' : 'sell';
-      const minBinId = data.readInt32LE(73);
-      const maxBinId = data.readInt32LE(77);
-      const initialAmount = Number(data.readBigUInt64LE(81));
-      return { pubkey, side, minBinId, maxBinId, initialAmount };
+      // Position layout: 8 disc + 32 owner + 32 lb_pair + 32 meteora_position + 1 side + 4+4+8+8+8+1
+      const meteoraPosition = new solanaWeb3.PublicKey(data.slice(72, 104));
+      const side = data.readUInt8(104) === 0 ? 'buy' : 'sell';
+      const minBinId = data.readInt32LE(105);
+      const maxBinId = data.readInt32LE(109);
+      const initialAmount = Number(data.readBigUInt64LE(113));
+      const harvestedAmount = Number(data.readBigUInt64LE(121));
+      return { pubkey, meteoraPosition, side, minBinId, maxBinId, initialAmount, harvestedAmount };
     });
   } catch (err) {
     if (CONFIG.DEBUG) console.error('Failed to fetch user positions:', err);
@@ -897,14 +1167,16 @@ async function fetchAllUserPositions() {
 
     return accounts.map(({ pubkey, account }) => {
       const data = account.data;
+      // Position layout: 8 disc + 32 owner + 32 lb_pair + 32 meteora_position + 1 side + 4+4+8+8+8+1
       const lbPair = new solanaWeb3.PublicKey(data.slice(40, 72)).toBase58();
-      const side = data.readUInt8(72) === 0 ? 'buy' : 'sell';
-      const minBinId = data.readInt32LE(73);
-      const maxBinId = data.readInt32LE(77);
-      const initialAmount = Number(data.readBigUInt64LE(81));
-      const harvestedAmount = Number(data.readBigUInt64LE(89));
-      const createdAt = Number(data.readBigInt64LE(97));
-      return { pubkey, lbPair, side, minBinId, maxBinId, initialAmount, harvestedAmount, createdAt };
+      const meteoraPosition = new solanaWeb3.PublicKey(data.slice(72, 104));
+      const side = data.readUInt8(104) === 0 ? 'buy' : 'sell';
+      const minBinId = data.readInt32LE(105);
+      const maxBinId = data.readInt32LE(109);
+      const initialAmount = Number(data.readBigUInt64LE(113));
+      const harvestedAmount = Number(data.readBigUInt64LE(121));
+      const createdAt = Number(data.readBigInt64LE(129));
+      return { pubkey, lbPair, meteoraPosition, side, minBinId, maxBinId, initialAmount, harvestedAmount, createdAt };
     });
   } catch (err) {
     if (CONFIG.DEBUG) console.error('Failed to fetch all positions:', err);
@@ -1145,7 +1417,7 @@ function renderBinViz() {
   }
 
   // Y-axis price labels (every ~10 bins)
-  ctx.fillStyle = 'rgba(58, 90, 140, 0.35)';
+  ctx.fillStyle = 'rgba(58, 90, 140, 0.44)';
   ctx.font = '300 8px "JetBrains Mono", monospace';
   ctx.textAlign = 'right';
   const labelInterval = Math.max(5, Math.round(totalBins / 10));
@@ -1228,50 +1500,186 @@ async function createPosition() {
   try {
     showToast('Building transaction...', 'info');
 
-    const { fee, net } = calculateAmounts(amount * 1e9);
+    const decimals = state.side === 'sell' ? state.tokenXDecimals : state.tokenYDecimals;
+    const depositAmount = BigInt(Math.round(amount * Math.pow(10, decimals)));
     const numBins = maxBin - minBin + 1;
 
     if (CONFIG.DEBUG) {
       console.log(`[monke] Create ${state.side} position`);
-      console.log(`  Amount: ${amount} ${state.side === 'buy' ? state.tokenXSymbol : state.tokenYSymbol}`);
+      console.log(`  Amount: ${amount} (${depositAmount} lamports, ${decimals} decimals)`);
       console.log(`  Bins: ${minBin} -> ${maxBin} (${numBins} bins)`);
     }
 
-    /*
-     * PRODUCTION PATH (once programs deployed):
-     *
-     * const positionKeypair = solanaWeb3.Keypair.generate();
-     * const slippage = state.binStep >= 80 ? 15 : 5;
-     * const tx = await buildOpenPositionTx(
-     *   state.connection, state.publicKey,
-     *   new solanaWeb3.PublicKey(state.poolAddress),
-     *   positionKeypair,
-     *   new BN(net), minBin, maxBin,
-     *   state.side, slippage, tokenMint, meteoraAccounts
-     * );
-     * const signed = await state.wallet.signTransaction(tx);
-     * const sig = await state.connection.sendRawTransaction(signed.serialize());
-     * await state.connection.confirmTransaction(sig, 'confirmed');
-     */
+    const conn = state.connection;
+    const user = state.publicKey;
+    const coreProgramId = new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID);
 
-    // DEMO MODE — simulated position (remove once programs deployed and production path above is enabled)
-    await new Promise(r => setTimeout(r, 1200));
+    // Resolve all Meteora CPI accounts from on-chain pool data
+    showToast('Resolving accounts...', 'info');
+    const cpi = await resolveMeteoraCPIAccounts(state.poolAddress, minBin, maxBin);
 
-    state.positions.push({
-      pool: `${state.tokenXSymbol}/${state.tokenYSymbol}`,
-      side: state.side,
-      minPrice: binToPrice(minBin, state.binStep),
-      maxPrice: binToPrice(maxBin, state.binStep),
-      filled: Math.floor(Math.random() * 20),
-      amount: net / 1e9,
-      lpFees: Math.random() * 0.05,
-    });
+    // Deposit token: sell = token X, buy = token Y (SOL)
+    const depositMint = state.side === 'sell' ? cpi.tokenXMint : cpi.tokenYMint;
+    const depositTokenProgramId = state.side === 'sell' ? cpi.tokenXProgramId : cpi.tokenYProgramId;
+
+    // Use V2 when either token is Token-2022
+    const useV2 = cpi.tokenXProgramId.equals(TOKEN_2022_PROGRAM_ID)
+               || cpi.tokenYProgramId.equals(TOKEN_2022_PROGRAM_ID);
+
+    const meteoraPositionKeypair = solanaWeb3.Keypair.generate();
+    const [configPDA] = getConfigPDA();
+    const [positionPDA] = getPositionPDA(meteoraPositionKeypair.publicKey);
+    const [vaultPDA] = getVaultPDA(meteoraPositionKeypair.publicKey);
+
+    // Derive user's deposit ATA
+    const userTokenAccount = getAssociatedTokenAddressSync(depositMint, user, false, depositTokenProgramId);
+
+    const tx = new solanaWeb3.Transaction();
+
+    // Initialize any missing Meteora bin arrays for this range
+    const initBinArrayIxs = await ensureBinArraysExist(cpi.lbPair, minBin, maxBin, user, cpi.dlmmProgram);
+    for (const ix of initBinArrayIxs) tx.add(ix);
+
+    // Create user deposit ATA + wrap SOL if buy side
+    const isNativeSol = depositMint.equals(NATIVE_MINT);
+    const userAtaInfo = await conn.getAccountInfo(userTokenAccount);
+    if (!userAtaInfo) {
+      tx.add(createAssociatedTokenAccountIx(user, userTokenAccount, user, depositMint, depositTokenProgramId));
+    }
+    if (isNativeSol) {
+      for (const ix of buildWrapSolIxs(user, userTokenAccount, depositAmount)) tx.add(ix);
+    }
+
+    const slippage = state.binStep >= 80 ? 15 : 5;
+    const bitmapExtWritable = !cpi.binArrayBitmapExt.equals(cpi.dlmmProgram);
+
+    if (useV2) {
+      // V2 path — Token-2022 compatible, uses add_liquidity_by_strategy2
+      const vaultTokenX = getAssociatedTokenAddressSync(cpi.tokenXMint, vaultPDA, true, cpi.tokenXProgramId);
+      const vaultTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, vaultPDA, true, cpi.tokenYProgramId);
+
+      // Create both vault ATAs
+      for (const [mint, ata, prog] of [
+        [cpi.tokenXMint, vaultTokenX, cpi.tokenXProgramId],
+        [cpi.tokenYMint, vaultTokenY, cpi.tokenYProgramId],
+      ]) {
+        const info = await conn.getAccountInfo(ata);
+        if (!info) tx.add(createAssociatedTokenAccountIx(user, ata, vaultPDA, mint, prog));
+      }
+
+      const instructionName = 'open_position_v2';
+      const ixData = await serializeOpenPositionIx(depositAmount, minBin, maxBin, state.side, slippage, instructionName);
+
+      console.log('[monke] Open position V2 (Token-2022):', { instructionName, useV2, amount: depositAmount.toString(), minBin, maxBin });
+
+      // Named struct accounts (17) + remaining_accounts (6)
+      // remaining: [0] bin_array_lower, [1] bin_array_upper, [2] event_authority,
+      //            [3] dlmm_program, [4] token_x_mint, [5] token_y_mint
+      const v2Keys = [
+        { pubkey: user, isSigner: true, isWritable: true },
+        { pubkey: configPDA, isSigner: false, isWritable: true },
+        { pubkey: cpi.lbPair, isSigner: false, isWritable: true },
+        { pubkey: meteoraPositionKeypair.publicKey, isSigner: true, isWritable: true },
+        { pubkey: cpi.binArrayBitmapExt, isSigner: false, isWritable: bitmapExtWritable },
+        { pubkey: cpi.reserveX, isSigner: false, isWritable: true },
+        { pubkey: cpi.reserveY, isSigner: false, isWritable: true },
+        { pubkey: positionPDA, isSigner: false, isWritable: true },
+        { pubkey: vaultPDA, isSigner: false, isWritable: true },
+        { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+        { pubkey: vaultTokenX, isSigner: false, isWritable: true },
+        { pubkey: vaultTokenY, isSigner: false, isWritable: true },
+        { pubkey: cpi.tokenXProgramId, isSigner: false, isWritable: false },
+        { pubkey: cpi.tokenYProgramId, isSigner: false, isWritable: false },
+        { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: solanaWeb3.SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+        // remaining_accounts
+        { pubkey: cpi.binArrayLower, isSigner: false, isWritable: true },
+        { pubkey: cpi.binArrayUpper, isSigner: false, isWritable: true },
+        { pubkey: cpi.eventAuthority, isSigner: false, isWritable: false },
+        { pubkey: cpi.dlmmProgram, isSigner: false, isWritable: false },
+        { pubkey: cpi.tokenXMint, isSigner: false, isWritable: false },
+        { pubkey: cpi.tokenYMint, isSigner: false, isWritable: false },
+      ];
+      tx.add(new solanaWeb3.TransactionInstruction({ programId: coreProgramId, keys: v2Keys, data: ixData }));
+    } else {
+      // V1 path — standard SPL Token pools only
+      const reserve = state.side === 'sell' ? cpi.reserveX : cpi.reserveY;
+      const tokenMint = depositMint;
+      const vaultTokenAccount = getAssociatedTokenAddressSync(tokenMint, vaultPDA, true, depositTokenProgramId);
+
+      const vaultAtaInfo = await conn.getAccountInfo(vaultTokenAccount);
+      if (!vaultAtaInfo) {
+        tx.add(createAssociatedTokenAccountIx(user, vaultTokenAccount, vaultPDA, tokenMint, depositTokenProgramId));
+      }
+
+      const instructionName = 'open_position';
+      const ixData = await serializeOpenPositionIx(depositAmount, minBin, maxBin, state.side, slippage, instructionName);
+
+      console.log('[monke] Open position V1 (SPL):', { instructionName, useV2, amount: depositAmount.toString(), minBin, maxBin });
+
+      // Account order matches OpenPosition struct (19 accounts)
+      tx.add(new solanaWeb3.TransactionInstruction({
+        programId: coreProgramId,
+        keys: [
+          { pubkey: user, isSigner: true, isWritable: true },
+          { pubkey: configPDA, isSigner: false, isWritable: true },
+          { pubkey: cpi.lbPair, isSigner: false, isWritable: true },
+          { pubkey: meteoraPositionKeypair.publicKey, isSigner: true, isWritable: true },
+          { pubkey: cpi.binArrayBitmapExt, isSigner: false, isWritable: bitmapExtWritable },
+          { pubkey: reserve, isSigner: false, isWritable: true },
+          { pubkey: cpi.binArrayLower, isSigner: false, isWritable: true },
+          { pubkey: cpi.binArrayUpper, isSigner: false, isWritable: true },
+          { pubkey: cpi.eventAuthority, isSigner: false, isWritable: false },
+          { pubkey: cpi.dlmmProgram, isSigner: false, isWritable: false },
+          { pubkey: positionPDA, isSigner: false, isWritable: true },
+          { pubkey: vaultPDA, isSigner: false, isWritable: true },
+          { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+          { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
+          { pubkey: tokenMint, isSigner: false, isWritable: false },
+          { pubkey: depositTokenProgramId, isSigner: false, isWritable: false },
+          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+          { pubkey: solanaWeb3.SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+        ],
+        data: ixData,
+      }));
+    }
+
+    // Set tx metadata
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.lastValidBlockHeight = lastValidBlockHeight;
+    tx.feePayer = user;
+
+    // Position keypair must sign (Meteora requires it for initialize_position)
+    tx.partialSign(meteoraPositionKeypair);
+
+    // Simulate first to get detailed error logs before wallet popup
+    const simResult = await conn.simulateTransaction(tx);
+    if (simResult.value.err) {
+      console.error('[monke] Simulation failed:', simResult.value.err);
+      console.error('[monke] Logs:', simResult.value.logs);
+      const lastLog = simResult.value.logs?.filter(l => l.includes('Error') || l.includes('failed') || l.includes('error')).pop()
+        || simResult.value.logs?.pop() || JSON.stringify(simResult.value.err);
+      throw new Error('Simulation: ' + lastLog);
+    }
+    if (CONFIG.DEBUG) console.log('[monke] Simulation OK:', simResult.value.logs);
+
+    showToast('Approve in wallet...', 'info');
+    const signed = await state.wallet.signTransaction(tx);
+    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+    showToast('Confirming...', 'info');
+    await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 
     showToast('Position created!', 'success');
-    updatePositionsList();
+    if (CONFIG.DEBUG) console.log(`[monke] Position tx: ${sig}`);
+
+    // Refresh positions list from on-chain
+    await refreshPositionsList();
   } catch (err) {
     console.error('Position creation failed:', err);
-    showToast('Failed: ' + err.message, 'error');
+    showToast('Failed: ' + (err?.message || err), 'error');
   } finally {
     if (btn) { btn.textContent = original; btn.disabled = false; }
   }
@@ -1280,6 +1688,35 @@ async function createPosition() {
 // ============================================================
 // POSITIONS LIST
 // ============================================================
+
+async function refreshPositionsList() {
+  if (!state.connected || !state.poolAddress) return;
+  try {
+    const positions = await fetchUserPositions(state.poolAddress);
+    state.positions = positions.map(p => {
+      const decimals = p.side === 'sell' ? state.tokenXDecimals : state.tokenYDecimals;
+      const fillPct = p.initialAmount > 0 ? Math.min(100, Math.round((p.harvestedAmount / p.initialAmount) * 100)) : 0;
+      return {
+        pubkey: p.pubkey,
+        meteoraPosition: p.meteoraPosition,
+        pool: `${state.tokenXSymbol}/${state.tokenYSymbol}`,
+        poolAddress: state.poolAddress,
+        side: p.side,
+        minBin: p.minBinId,
+        maxBin: p.maxBinId,
+        minPrice: binToPrice(p.minBinId, state.binStep),
+        maxPrice: binToPrice(p.maxBinId, state.binStep),
+        filled: fillPct,
+        amount: p.initialAmount / Math.pow(10, decimals),
+        initialAmount: p.initialAmount,
+        lpFees: 0,
+      };
+    });
+  } catch (err) {
+    if (CONFIG.DEBUG) console.error('Failed to refresh positions:', err);
+  }
+  updatePositionsList();
+}
 
 function updatePositionsList() {
   const container = document.getElementById('positionsList');
@@ -1299,7 +1736,7 @@ function updatePositionsList() {
     <div class="position-row">
       <span>${escapeHtml(p.pool)}</span>
       <span class="position-side ${escapeHtml(p.side)}">${escapeHtml(p.side)}</span>
-      <span>${escapeHtml(p.filled)}%</span>
+      <span>${typeof p.filled === 'number' ? p.filled : 0}%</span>
       <button class="close-btn" data-idx="${i}">close</button>
       <button class="action-btn-sm share-btn" data-idx="${i}">share</button>
     </div>
@@ -1314,20 +1751,106 @@ function updatePositionsList() {
 }
 
 async function closePosition(index) {
-  showToast('Closing position...', 'info');
+  const pos = state.positions[index];
+  if (!pos) { showToast('Position not found', 'error'); return; }
+  if (!pos.pubkey || !pos.meteoraPosition) {
+    showToast('Missing position data — reload page', 'error');
+    return;
+  }
 
-  /*
-   * PRODUCTION:
-   * const tx = await buildUserCloseTx(connection, user, positionPDA, positionData, meteoraAccounts);
-   * const signed = await state.wallet.signTransaction(tx);
-   * await state.connection.sendRawTransaction(signed.serialize());
-   */
+  const closeBtn = document.querySelectorAll('.close-btn')[index];
+  if (closeBtn) { closeBtn.textContent = 'closing...'; closeBtn.disabled = true; }
 
-  // DEMO MODE — simulated close (remove once programs deployed and production path above is enabled)
-  await new Promise(r => setTimeout(r, 800));
-  state.positions.splice(index, 1);
-  showToast('Position closed', 'success');
-  updatePositionsList();
+  try {
+    showToast('Building close transaction...', 'info');
+
+    const conn = state.connection;
+    const user = state.publicKey;
+    const coreProgramId = new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID);
+
+    const poolAddr = pos.poolAddress || state.poolAddress;
+    const cpi = await resolveMeteoraCPIAccounts(poolAddr, pos.minBin, pos.maxBin);
+
+    const [configPDA] = getConfigPDA();
+    const [positionPDA] = getPositionPDA(pos.meteoraPosition);
+    const [vaultPDA] = getVaultPDA(pos.meteoraPosition);
+    const [roverAuthorityPDA] = getRoverAuthorityPDA();
+
+    const vaultTokenX = getAssociatedTokenAddressSync(cpi.tokenXMint, vaultPDA, true, cpi.tokenXProgramId);
+    const vaultTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, vaultPDA, true, cpi.tokenYProgramId);
+    const userTokenX = getAssociatedTokenAddressSync(cpi.tokenXMint, user, false, cpi.tokenXProgramId);
+    const userTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, user, false, cpi.tokenYProgramId);
+    const roverFeeTokenX = getAssociatedTokenAddressSync(cpi.tokenXMint, roverAuthorityPDA, true, cpi.tokenXProgramId);
+    const roverFeeTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, roverAuthorityPDA, true, cpi.tokenYProgramId);
+
+    const tx = new solanaWeb3.Transaction();
+
+    // Ensure user ATAs exist
+    const [userXInfo, userYInfo] = await Promise.all([
+      conn.getAccountInfo(userTokenX),
+      conn.getAccountInfo(userTokenY),
+    ]);
+    if (!userXInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenX, user, cpi.tokenXMint, cpi.tokenXProgramId));
+    if (!userYInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenY, user, cpi.tokenYMint, cpi.tokenYProgramId));
+
+    const ixData = await serializeNoArgsIx('user_close');
+
+    // Account order matches on-chain UserClose struct exactly
+    tx.add(new solanaWeb3.TransactionInstruction({
+      programId: coreProgramId,
+      keys: [
+        { pubkey: user, isSigner: true, isWritable: true },
+        { pubkey: configPDA, isSigner: false, isWritable: true },
+        { pubkey: pos.pubkey, isSigner: false, isWritable: true },         // position PDA
+        { pubkey: vaultPDA, isSigner: false, isWritable: true },
+        { pubkey: pos.meteoraPosition, isSigner: false, isWritable: true },
+        { pubkey: cpi.lbPair, isSigner: false, isWritable: true },
+        { pubkey: cpi.binArrayBitmapExt, isSigner: false, isWritable: !cpi.binArrayBitmapExt.equals(cpi.dlmmProgram) },
+        { pubkey: cpi.binArrayLower, isSigner: false, isWritable: true },
+        { pubkey: cpi.binArrayUpper, isSigner: false, isWritable: true },
+        { pubkey: cpi.reserveX, isSigner: false, isWritable: true },
+        { pubkey: cpi.reserveY, isSigner: false, isWritable: true },
+        { pubkey: cpi.tokenXMint, isSigner: false, isWritable: false },
+        { pubkey: cpi.tokenYMint, isSigner: false, isWritable: false },
+        { pubkey: cpi.eventAuthority, isSigner: false, isWritable: false },
+        { pubkey: cpi.dlmmProgram, isSigner: false, isWritable: false },
+        { pubkey: vaultTokenX, isSigner: false, isWritable: true },
+        { pubkey: vaultTokenY, isSigner: false, isWritable: true },
+        { pubkey: userTokenX, isSigner: false, isWritable: true },
+        { pubkey: userTokenY, isSigner: false, isWritable: true },
+        { pubkey: roverAuthorityPDA, isSigner: false, isWritable: false },
+        { pubkey: roverFeeTokenX, isSigner: false, isWritable: true },
+        { pubkey: roverFeeTokenY, isSigner: false, isWritable: true },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: cpi.tokenXProgramId, isSigner: false, isWritable: false },
+        { pubkey: cpi.tokenYProgramId, isSigner: false, isWritable: false },
+        { pubkey: SPL_MEMO_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: solanaWeb3.SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: ixData,
+    }));
+
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.lastValidBlockHeight = lastValidBlockHeight;
+    tx.feePayer = user;
+
+    showToast('Approve in wallet...', 'info');
+    const signed = await state.wallet.signTransaction(tx);
+    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    showToast('Confirming...', 'info');
+    await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+
+    showToast('Position closed', 'success');
+    if (CONFIG.DEBUG) console.log(`[monke] Close tx: ${sig}`);
+
+    await refreshPositionsList();
+  } catch (err) {
+    console.error('Close failed:', err);
+    showToast('Close failed: ' + (err?.message || err), 'error');
+  } finally {
+    if (closeBtn) { closeBtn.textContent = 'close'; closeBtn.disabled = false; }
+  }
 }
 
 // ============================================================
