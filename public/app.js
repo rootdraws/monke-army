@@ -1243,6 +1243,7 @@ async function renderPositionsPage() {
       <span class="pos-filled">${fillPct}%<div class="pos-fill-bar"><div class="pos-fill-bar-inner ${pos.side}" style="width:${fillPct}%"></div></div></span>
       <span class="pos-amount">${(pos.initialAmount / 1e9).toFixed(4)}</span>
       <span class="pos-status ${status}">${status}</span>
+      <button class="close-btn" data-pubkey="${pos.pubkey.toBase58()}" data-lbpair="${pos.lbPair}" data-metpos="${pos.meteoraPosition.toBase58()}" data-min="${pos.minBinId}" data-max="${pos.maxBinId}">close</button>
     </div>`;
   }
 
@@ -1252,6 +1253,27 @@ async function renderPositionsPage() {
   if (harvestEl) harvestEl.textContent = (totalHarvested / 1e9).toFixed(4) + ' SOL';
   const avgFill = positions.reduce((sum, p) => sum + (p.initialAmount > 0 ? p.harvestedAmount / p.initialAmount : 0), 0) / positions.length;
   if (avgFillEl) avgFillEl.textContent = Math.round(avgFill * 100) + '%';
+
+  listEl.querySelectorAll('.close-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const pubkey = new solanaWeb3.PublicKey(btn.dataset.pubkey);
+      const meteoraPosition = new solanaWeb3.PublicKey(btn.dataset.metpos);
+      const lbPair = btn.dataset.lbpair;
+      const minBin = parseInt(btn.dataset.min);
+      const maxBin = parseInt(btn.dataset.max);
+      btn.textContent = 'closing...'; btn.disabled = true;
+      try {
+        const pos = { pubkey, meteoraPosition, poolAddress: lbPair, minBin, maxBin };
+        await closePositionDirect(pos);
+        showToast('Position closed', 'success');
+        renderPositionsPage();
+      } catch (err) {
+        console.error('Close failed:', err);
+        showToast('Close failed: ' + (err?.message || err), 'error');
+        btn.textContent = 'close'; btn.disabled = false;
+      }
+    });
+  });
 }
 
 function aggregateUserBins(positions, activeBin) {
@@ -1675,8 +1697,9 @@ async function createPosition() {
     showToast('Position created!', 'success');
     if (CONFIG.DEBUG) console.log(`[monke] Position tx: ${sig}`);
 
-    // Refresh positions list from on-chain
+    // Refresh positions list + chart from on-chain
     await refreshPositionsList();
+    loadBinVizData();
   } catch (err) {
     console.error('Position creation failed:', err);
     showToast('Failed: ' + (err?.message || err), 'error');
@@ -1845,12 +1868,87 @@ async function closePosition(index) {
     if (CONFIG.DEBUG) console.log(`[monke] Close tx: ${sig}`);
 
     await refreshPositionsList();
+    loadBinVizData();
   } catch (err) {
     console.error('Close failed:', err);
     showToast('Close failed: ' + (err?.message || err), 'error');
   } finally {
     if (closeBtn) { closeBtn.textContent = 'close'; closeBtn.disabled = false; }
   }
+}
+
+/** Close a position by direct data (used by positions page). */
+async function closePositionDirect(pos) {
+  if (!state.connected) throw new Error('Connect wallet first');
+  const conn = state.connection;
+  const user = state.publicKey;
+  const coreProgramId = new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID);
+
+  const cpi = await resolveMeteoraCPIAccounts(pos.poolAddress, pos.minBin, pos.maxBin);
+
+  const [configPDA] = getConfigPDA();
+  const [positionPDA] = getPositionPDA(pos.meteoraPosition);
+  const [vaultPDA] = getVaultPDA(pos.meteoraPosition);
+  const [roverAuthorityPDA] = getRoverAuthorityPDA();
+
+  const vaultTokenX = getAssociatedTokenAddressSync(cpi.tokenXMint, vaultPDA, true, cpi.tokenXProgramId);
+  const vaultTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, vaultPDA, true, cpi.tokenYProgramId);
+  const userTokenX = getAssociatedTokenAddressSync(cpi.tokenXMint, user, false, cpi.tokenXProgramId);
+  const userTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, user, false, cpi.tokenYProgramId);
+  const roverFeeTokenX = getAssociatedTokenAddressSync(cpi.tokenXMint, roverAuthorityPDA, true, cpi.tokenXProgramId);
+  const roverFeeTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, roverAuthorityPDA, true, cpi.tokenYProgramId);
+
+  const tx = new solanaWeb3.Transaction();
+  const [userXInfo, userYInfo] = await Promise.all([conn.getAccountInfo(userTokenX), conn.getAccountInfo(userTokenY)]);
+  if (!userXInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenX, user, cpi.tokenXMint, cpi.tokenXProgramId));
+  if (!userYInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenY, user, cpi.tokenYMint, cpi.tokenYProgramId));
+
+  const ixData = await serializeNoArgsIx('user_close');
+  tx.add(new solanaWeb3.TransactionInstruction({
+    programId: coreProgramId,
+    keys: [
+      { pubkey: user, isSigner: true, isWritable: true },
+      { pubkey: configPDA, isSigner: false, isWritable: true },
+      { pubkey: pos.pubkey, isSigner: false, isWritable: true },
+      { pubkey: vaultPDA, isSigner: false, isWritable: true },
+      { pubkey: pos.meteoraPosition, isSigner: false, isWritable: true },
+      { pubkey: cpi.lbPair, isSigner: false, isWritable: true },
+      { pubkey: cpi.binArrayBitmapExt, isSigner: false, isWritable: !cpi.binArrayBitmapExt.equals(cpi.dlmmProgram) },
+      { pubkey: cpi.binArrayLower, isSigner: false, isWritable: true },
+      { pubkey: cpi.binArrayUpper, isSigner: false, isWritable: true },
+      { pubkey: cpi.reserveX, isSigner: false, isWritable: true },
+      { pubkey: cpi.reserveY, isSigner: false, isWritable: true },
+      { pubkey: cpi.tokenXMint, isSigner: false, isWritable: false },
+      { pubkey: cpi.tokenYMint, isSigner: false, isWritable: false },
+      { pubkey: cpi.eventAuthority, isSigner: false, isWritable: false },
+      { pubkey: cpi.dlmmProgram, isSigner: false, isWritable: false },
+      { pubkey: vaultTokenX, isSigner: false, isWritable: true },
+      { pubkey: vaultTokenY, isSigner: false, isWritable: true },
+      { pubkey: userTokenX, isSigner: false, isWritable: true },
+      { pubkey: userTokenY, isSigner: false, isWritable: true },
+      { pubkey: roverAuthorityPDA, isSigner: false, isWritable: false },
+      { pubkey: roverFeeTokenX, isSigner: false, isWritable: true },
+      { pubkey: roverFeeTokenY, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: cpi.tokenXProgramId, isSigner: false, isWritable: false },
+      { pubkey: cpi.tokenYProgramId, isSigner: false, isWritable: false },
+      { pubkey: SPL_MEMO_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: solanaWeb3.SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data: ixData,
+  }));
+
+  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+  tx.recentBlockhash = blockhash;
+  tx.lastValidBlockHeight = lastValidBlockHeight;
+  tx.feePayer = user;
+
+  showToast('Approve in wallet...', 'info');
+  const signed = await state.wallet.signTransaction(tx);
+  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+  showToast('Confirming...', 'info');
+  await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+  if (CONFIG.DEBUG) console.log(`[monke] Close tx: ${sig}`);
 }
 
 // ============================================================
