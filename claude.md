@@ -137,7 +137,9 @@ $BANANAS launched via Meteora Invent DAMM v2 pool with Alpha Vault pro-rata fair
 
 ## Implementation notes
 
-**All CPI is V2.** `initialize_position2`, `add_liquidity_by_strategy2`, `remove_liquidity_by_range2`, `claim_fee2`, `close_position2`. No V1 code remains.
+**Transfer CPI fix (next session).** `execute_close_transfers()` at line 1798 in `lib.rs` is the shared function for all outbound transfers (close_position, user_close). It takes `token_x_program` and `token_y_program` as `&AccountInfo` but does NOT receive mint accounts or decimals. The fix must: (1) add `token_x_mint: &AccountInfo`, `token_y_mint: &AccountInfo` params, (2) read decimals from mint data (`data[44]` for SPL Token, or use `Mint::unpack(&data)?.decimals`), (3) replace `Transfer`/`transfer` with `TransferChecked`/`transfer_checked`. The same pattern applies to the 4 direct `transfer()` calls in `harvest_bins` (lines ~895-914) and `apply_emergency_close` (lines ~1105-1126). Test with `npx tsx scripts/test-close-position.ts` — it hits the real stuck position on mainnet and prints full program logs on failure.
+
+**All Meteora CPI is V2.** `initialize_position2`, `add_liquidity_by_strategy2`, `remove_liquidity_by_range2`, `claim_fee2`, `close_position2`. No V1 code remains.
 
 **Do not remove `Box<>` wrappers on `InterfaceAccount` / `Account` fields.** These are `Box`ed to avoid BPF 4KB stack frame overflow. Removing any `Box<>` will cause access violations at runtime. Mint fields use `UncheckedAccount` (no Box needed — no deserialization). `CloseRoverTokenAccount.token_account` is unboxed `InterfaceAccount` (single field, fits in frame).
 
