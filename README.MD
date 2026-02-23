@@ -107,6 +107,7 @@ bin-farm/
 │   ├── meteora-accounts.ts        # Shared Meteora CPI account resolution + DLMM cache
 │   ├── harvest-executor.ts        # Job queue: harvest/close tx (emits events to relay)
 │   ├── keeper.ts                  # MonkeKeeper: Saturday sequencer + rover TVL computation
+│   ├── retry.ts                   # Shared withRetry (exponential backoff, 3 retries)
 │   └── logger.ts                  # Pino structured logging
 ├── public/                        # Frontend: Enlist / Trade / Positions / Rank / Ops / Recon
 │   ├── index.html                 # 6 pages (Enlist/Trade/Positions/Rank/Ops/Recon) + sigil astrolabe
@@ -191,8 +192,8 @@ Plus: sub-second harvest via LaserStream, permissionless fallback on all operati
 ## Run Frontend
 
 ```bash
-npx vite public                               # dev (HMR)
-npm run build:frontend && npx serve dist      # production
+node scripts/build-frontend.mjs && npx serve dist   # local dev
+npm run build:frontend && npx serve dist             # production
 ```
 
 Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page), **Trade** (DLMM harvester, default SOL/USDC pool), **Positions** (all wallet positions with inline close + claim fees), **Rank** (monke feed/claim + leaderboard, sub-pages: Monke + Roster), **Ops** (bounty board + permissionless crank + live stats from relay), **Recon** (rover TVL — deferred). 6-page navigation with sigil astrolabe. Bot relay provides live data via WebSocket (`/ws`) and REST (`/api/*`) on the same health server port.
@@ -256,9 +257,11 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page),
 
 ## Known Limitations
 
-- **Token-2022 Transfer Fee mints:** Tokens with the Transfer Fee extension work end-to-end, but the recipient receives slightly less than displayed. The protocol's delta-based fee calculation is accurate, but downstream transfers also incur the token's built-in transfer fee. Economic impact bounded by the token's fee rate (typically <2%).
+- **Token-2022 outbound transfer CPI (in progress):** Account validation accepts Token-2022 mints/ATAs, and all Meteora CPIs succeed. However, the program's own outbound transfers (fee routing, owner payouts) use `anchor_spl::token::transfer` which fails for Token-2022 accounts. Fix in progress: migrate to `anchor_spl::token_interface::transfer_checked`. SPL Token-only pools work end-to-end. See `TODO.md` BLOCKER section.
 
-- **Token-2022 Transfer Hook mints:** Mints with the Transfer Hook extension are **not supported**. Positions on pools with transfer hook mints will fail to harvest or close. See `risk.md` for full details and mitigations.
+- **Token-2022 Transfer Fee mints:** Once the transfer CPI fix lands, tokens with the Transfer Fee extension will work end-to-end, but the recipient receives slightly less than displayed. The protocol's delta-based fee calculation is accurate, but downstream transfers also incur the token's built-in transfer fee. Economic impact bounded by the token's fee rate (typically <2%).
+
+- **Token-2022 Transfer Hook mints:** Mints with the Transfer Hook extension are **not supported**. Transfer hook extra accounts are not resolved (`RemainingAccountsInfo::empty_hooks()` used everywhere). Add when demand exists.
 
 ## Dependencies
 

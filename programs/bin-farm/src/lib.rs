@@ -14,7 +14,8 @@
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
-use anchor_spl::token::{TokenAccount, Mint, Transfer, transfer};
+use anchor_spl::token::{Transfer, transfer};
+use anchor_spl::token_interface::TokenAccount as ITokenAccount;
 
 mod meteora_dlmm_cpi;
 use meteora_dlmm_cpi::*;
@@ -1797,8 +1798,8 @@ fn memo_cpi<'info>(
 fn execute_close_transfers<'info>(
     side: Side,
     fee_bps: u16,
-    vault_token_x: &mut Account<'info, TokenAccount>,
-    vault_token_y: &mut Account<'info, TokenAccount>,
+    vault_token_x: &mut InterfaceAccount<'info, ITokenAccount>,
+    vault_token_y: &mut InterfaceAccount<'info, ITokenAccount>,
     recipient_token_x: &AccountInfo<'info>,
     recipient_token_y: &AccountInfo<'info>,
     rover_fee_token_y: &AccountInfo<'info>,
@@ -2232,8 +2233,10 @@ pub struct ClosePosition<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Box<Account<'info, Mint>>,
-    pub token_y_mint: Box<Account<'info, Mint>>,
+    /// CHECK: Token X mint — passed through to Meteora CPI
+    pub token_x_mint: UncheckedAccount<'info>,
+    /// CHECK: Token Y mint — passed through to Meteora CPI
+    pub token_y_mint: UncheckedAccount<'info>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2245,26 +2248,26 @@ pub struct ClosePosition<'info> {
     // --- Token accounts (ownership validated) ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Box<Account<'info, TokenAccount>>,
+    pub vault_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Box<Account<'info, TokenAccount>>,
+    pub vault_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = owner_token_x.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_x: Box<Account<'info, TokenAccount>>,
+    pub owner_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_y: Box<Account<'info, TokenAccount>>,
+    pub owner_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
     pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     #[account(mut, constraint = rover_fee_token_x.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_x: Box<Account<'info, TokenAccount>>,
+    pub rover_fee_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
+    pub rover_fee_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2340,8 +2343,10 @@ pub struct BotHarvest<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Box<Account<'info, Mint>>,
-    pub token_y_mint: Box<Account<'info, Mint>>,
+    /// CHECK: Token X mint — passed through to Meteora CPI
+    pub token_x_mint: UncheckedAccount<'info>,
+    /// CHECK: Token Y mint — passed through to Meteora CPI
+    pub token_y_mint: UncheckedAccount<'info>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2353,26 +2358,26 @@ pub struct BotHarvest<'info> {
     // --- Token accounts (ownership validated) ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Box<Account<'info, TokenAccount>>,
+    pub vault_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Box<Account<'info, TokenAccount>>,
+    pub vault_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = owner_token_x.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_x: Box<Account<'info, TokenAccount>>,
+    pub owner_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_y: Box<Account<'info, TokenAccount>>,
+    pub owner_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
     pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     #[account(mut, constraint = rover_fee_token_x.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_x: Box<Account<'info, TokenAccount>>,
+    pub rover_fee_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
+    pub rover_fee_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2440,8 +2445,10 @@ pub struct UserClose<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Box<Account<'info, Mint>>,
-    pub token_y_mint: Box<Account<'info, Mint>>,
+    /// CHECK: Token X mint — passed through to Meteora CPI
+    pub token_x_mint: UncheckedAccount<'info>,
+    /// CHECK: Token Y mint — passed through to Meteora CPI
+    pub token_y_mint: UncheckedAccount<'info>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2453,26 +2460,26 @@ pub struct UserClose<'info> {
     // --- Token accounts ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Box<Account<'info, TokenAccount>>,
+    pub vault_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Box<Account<'info, TokenAccount>>,
+    pub vault_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = user_token_x.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_x: Box<Account<'info, TokenAccount>>,
+    pub user_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = user_token_y.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_y: Box<Account<'info, TokenAccount>>,
+    pub user_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
     pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
     #[account(mut, constraint = rover_fee_token_x.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_x: Box<Account<'info, TokenAccount>>,
+    pub rover_fee_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
+    pub rover_fee_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2532,8 +2539,10 @@ pub struct ClaimFees<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    pub token_x_mint: Box<Account<'info, Mint>>,
-    pub token_y_mint: Box<Account<'info, Mint>>,
+    /// CHECK: Token X mint — passed through to Meteora CPI
+    pub token_x_mint: UncheckedAccount<'info>,
+    /// CHECK: Token Y mint — passed through to Meteora CPI
+    pub token_y_mint: UncheckedAccount<'info>,
 
     /// CHECK: Event authority
     pub event_authority: AccountInfo<'info>,
@@ -2545,16 +2554,16 @@ pub struct ClaimFees<'info> {
     // --- Token accounts ---
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Box<Account<'info, TokenAccount>>,
+    pub vault_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Box<Account<'info, TokenAccount>>,
+    pub vault_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = user_token_x.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_x: Box<Account<'info, TokenAccount>>,
+    pub user_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = user_token_y.owner == user.key() @ CoreError::InvalidTokenOwner)]
-    pub user_token_y: Box<Account<'info, TokenAccount>>,
+    pub user_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2619,16 +2628,16 @@ pub struct ApplyEmergencyClose<'info> {
     pub owner: AccountInfo<'info>,
 
     #[account(mut, constraint = vault_token_x.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_x: Box<Account<'info, TokenAccount>>,
+    pub vault_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = vault_token_y.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_y: Box<Account<'info, TokenAccount>>,
+    pub vault_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = owner_token_x.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_x: Box<Account<'info, TokenAccount>>,
+    pub owner_token_x: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
-    pub owner_token_y: Box<Account<'info, TokenAccount>>,
+    pub owner_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     /// CHECK: Token X program
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2853,7 +2862,7 @@ pub struct CloseRoverTokenAccount<'info> {
         mut,
         constraint = token_account.owner == rover_authority.key() @ CoreError::InvalidTokenOwner
     )]
-    pub token_account: Account<'info, TokenAccount>,
+    pub token_account: InterfaceAccount<'info, ITokenAccount>,
 
     /// CHECK: SPL Token or Token-2022
     #[account(constraint = *token_program.key == anchor_spl::token::ID || *token_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2915,7 +2924,7 @@ pub struct OpenFeeRover<'info> {
 
     /// Source: rover_authority's token account (accumulated fee tokens)
     #[account(mut, constraint = rover_token_account.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
-    pub rover_token_account: Box<Account<'info, TokenAccount>>,
+    pub rover_token_account: Box<InterfaceAccount<'info, ITokenAccount>>,
 
     /// CHECK: Vault token X account. Validated in handler.
     #[account(mut)]

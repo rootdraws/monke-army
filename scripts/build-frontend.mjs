@@ -103,7 +103,7 @@ html = html.replace('src="enlist.bundle.js"', 'src="enlist.bundle.js"'); // no c
 writeFileSync(join(distDir, 'index.html'), html);
 
 // 4. Copy static assets
-for (const file of ['config.json', 'styles.css']) {
+for (const file of ['config.json', 'styles.css', 'monke.png']) {
   const src = join(publicDir, file);
   if (existsSync(src)) {
     copyFileSync(src, join(distDir, file));

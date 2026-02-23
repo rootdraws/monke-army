@@ -63,24 +63,7 @@ interface ExecutorConfig {
 
 // ═══ HELPERS ═══
 
-const MAX_RETRIES = 3;
-const BASE_DELAY = 1000;
-
-async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
-  let lastErr: Error | undefined;
-  for (let i = 0; i <= MAX_RETRIES; i++) {
-    try { return await fn(); }
-    catch (e: any) {
-      lastErr = e;
-      if (i < MAX_RETRIES) {
-        const delay = BASE_DELAY * Math.pow(2, i);
-        logger.warn(`  [retry] ${label} #${i + 1}, ${delay}ms`);
-        await new Promise(r => setTimeout(r, delay));
-      }
-    }
-  }
-  throw lastErr;
-}
+import { withRetry } from './retry';
 
 function coreConfigPDA(coreProgramId: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([Buffer.from('config')], coreProgramId);
@@ -286,8 +269,14 @@ export class HarvestExecutor extends EventEmitter {
     const roverFeeTokenX = getAssociatedTokenAddressSync(meteora.tokenXMint, roverAuthority, true, meteora.tokenXProgram);
     const roverFeeTokenY = getAssociatedTokenAddressSync(meteora.tokenYMint, roverAuthority, true, meteora.tokenYProgram);
 
-    // Ensure rover_authority ATAs exist (idempotent — no-op if already created)
+    // Ensure owner + rover ATAs exist (idempotent — no-op if already created)
     const { createAssociatedTokenAccountIdempotentInstruction } = await import('@solana/spl-token');
+    const createOwnerAtaX = createAssociatedTokenAccountIdempotentInstruction(
+      this.botKeypair.publicKey, ownerTokenX, job.owner, meteora.tokenXMint, meteora.tokenXProgram,
+    );
+    const createOwnerAtaY = createAssociatedTokenAccountIdempotentInstruction(
+      this.botKeypair.publicKey, ownerTokenY, job.owner, meteora.tokenYMint, meteora.tokenYProgram,
+    );
     const createRoverAtaX = createAssociatedTokenAccountIdempotentInstruction(
       this.botKeypair.publicKey, roverFeeTokenX, roverAuthority, meteora.tokenXMint, meteora.tokenXProgram,
     );
@@ -329,7 +318,7 @@ export class HarvestExecutor extends EventEmitter {
           tokenYProgram:      meteora.tokenYProgram,
           memoProgram:        meteora.memoProgram,
         })
-        .preInstructions([...priorityIxs, createRoverAtaX, createRoverAtaY])
+        .preInstructions([...priorityIxs, createOwnerAtaX, createOwnerAtaY, createRoverAtaX, createRoverAtaY])
         .signers([this.botKeypair])
         .rpc(),
       `harvest ${key.slice(0, 8)}`
@@ -381,6 +370,12 @@ export class HarvestExecutor extends EventEmitter {
     const roverFeeTokenY = getAssociatedTokenAddressSync(meteora.tokenYMint, roverAuthority, true, meteora.tokenYProgram);
 
     const { createAssociatedTokenAccountIdempotentInstruction } = await import('@solana/spl-token');
+    const createOwnerAtaX = createAssociatedTokenAccountIdempotentInstruction(
+      this.botKeypair.publicKey, ownerTokenX, job.owner, meteora.tokenXMint, meteora.tokenXProgram,
+    );
+    const createOwnerAtaY = createAssociatedTokenAccountIdempotentInstruction(
+      this.botKeypair.publicKey, ownerTokenY, job.owner, meteora.tokenYMint, meteora.tokenYProgram,
+    );
     const createRoverAtaX = createAssociatedTokenAccountIdempotentInstruction(
       this.botKeypair.publicKey, roverFeeTokenX, roverAuthority, meteora.tokenXMint, meteora.tokenXProgram,
     );
@@ -424,7 +419,7 @@ export class HarvestExecutor extends EventEmitter {
           memoProgram:        meteora.memoProgram,
           systemProgram:      new PublicKey('11111111111111111111111111111111'),
         })
-        .preInstructions([...priorityIxs, createRoverAtaX, createRoverAtaY])
+        .preInstructions([...priorityIxs, createOwnerAtaX, createOwnerAtaY, createRoverAtaX, createRoverAtaY])
         .signers([this.botKeypair])
         .rpc(),
       `close ${key.slice(0, 8)}`

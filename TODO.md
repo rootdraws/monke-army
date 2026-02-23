@@ -2,6 +2,49 @@
 
 ---
 
+## BLOCKER — Token-2022 transfer CPI fix (program change required)
+
+Position `3qQGCmDY` on pool `ABdAmqgz3CNvU9kjn5fAtnFurvBvgs6PP7ksTb3VfzQM` is stuck. Token X is `79hW22KCd32YsJA59pWU5Y2Wthuchb5GsmZCT8v4pump` (Token-2022, flag=1). Token Y is SOL (SPL Token).
+
+**What works:** Account validation passes (Feb 23 fix — `InterfaceAccount` for token accounts, `UncheckedAccount` for mints). All 3 Meteora CPIs succeed (`RemoveLiquidityByRange2`, `ClaimFee2`, `ClosePosition2`). Owner + rover ATAs are pre-created correctly by the bot.
+
+**What fails:** After Meteora CPIs, the program's own outbound transfers fail. `anchor_spl::token::transfer()` generates an SPL Token `Transfer` instruction, but the token accounts are owned by Token-2022. SPL Token can't read Token-2022 account data → `InvalidAccountData`.
+
+**Evidence (from `npx tsx scripts/test-close-position.ts`):**
+```
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+Program log: Instruction: Transfer
+Program log: Error: InvalidAccountData
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: invalid account data for instruction
+```
+
+**Fix:** In `programs/bin-farm/src/lib.rs`, replace all 8 `transfer()` call sites with `transfer_checked()` from `anchor_spl::token_interface`:
+
+1. Change import (line 17): `use anchor_spl::token::{Transfer, transfer};` → `use anchor_spl::token_interface::{TransferChecked, transfer_checked};`
+2. Each call site changes from:
+```rust
+transfer(CpiContext::new_with_signer(
+    token_x_program.to_account_info(),
+    Transfer { from, to, authority }, signer,
+), amount)?;
+```
+to:
+```rust
+transfer_checked(CpiContext::new_with_signer(
+    token_x_program.to_account_info(),
+    TransferChecked { from, mint: token_x_mint.to_account_info(), to, authority }, signer,
+), amount, decimals)?;
+```
+3. The `mint` and `decimals` parameters must be threaded to `execute_close_transfers` and the harvest/emergency-close handlers. Get decimals from the mint account (read on-chain) or hardcode a lookup.
+4. **8 call sites** at lines: 897, 908, 1107, 1120, 1844, 1855, 1866, 1877.
+5. Rebuild: `PATH="$HOME/.cargo/bin:$PATH" cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml`
+6. Deploy: `solana program deploy target/deploy/bin_farm.so --program-id 8FJyoK7UKhYB8qd8187oVWFngQ5ZoVPbNWXSUeZSdgia --url mainnet-beta`
+7. Verify: `npx tsx scripts/test-close-position.ts` — should print `SUCCESS` with a tx signature.
+
+- [ ] **Fix transfer CPI for Token-2022** — Replace `anchor_spl::token::{Transfer, transfer}` with `anchor_spl::token_interface::{TransferChecked, transfer_checked}` at all 8 call sites. Thread mint accounts + decimals. Rebuild + redeploy.
+
+---
+
 ## Tier 1 — Security
 
 - [ ] **Rotate Helius API key** — Go to Helius dashboard, generate new key. Free-tier key for `public/config.json`, Pro key in `bot/.env` only. Do before repo goes public.
@@ -83,4 +126,4 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
 ---
 
-*Last updated: Feb 22, 2026.*
+*Last updated: Feb 23, 2026 (session 2).*

@@ -2859,7 +2859,7 @@ function showSubPage(subName) {
 
 const PAGE_IDS = ['page-enlist', 'page-trade', 'page-positions', 'page-rank', 'page-ops', 'page-recon'];
 const PAGE_BODY_CLASSES = ['on-enlist', 'on-trade', 'on-positions', 'on-rank', 'on-ops', 'on-recon'];
-const PAGE_ACCENT = ['#9DE5B5', '#9DE5B5', '#9DE5B5', '#9DE5B5', '#9DE5B5', '#9DE5B5'];
+const PAGE_ACCENT = ['#F2D662', '#9DE5B5', '#9DE5B5', '#F2D662', '#C4CFCB', '#9DE5B5'];
 
 function showPage(idx) {
   state.currentPage = idx;
