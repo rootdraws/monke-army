@@ -581,7 +581,7 @@ pub struct Initialize<'info> {
     )]
     pub program_vault: AccountInfo<'info>,
 
-    /// CHECK: dist_pool PDA — SOL arrives here from rover sweep (100% to monke holders)
+    /// CHECK: dist_pool PDA — SOL arrives here from rover sweep (50% of swept revenue)
     #[account(
         seeds = [b"dist_pool"],
         bump

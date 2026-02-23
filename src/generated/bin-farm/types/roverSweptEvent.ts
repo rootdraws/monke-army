@@ -24,20 +24,29 @@ import {
 
 export type RoverSweptEvent = {
   amount: bigint;
+  monkeShare: bigint;
+  operatorShare: bigint;
   distPool: Address;
+  bot: Address;
   timestamp: bigint;
 };
 
 export type RoverSweptEventArgs = {
   amount: number | bigint;
+  monkeShare: number | bigint;
+  operatorShare: number | bigint;
   distPool: Address;
+  bot: Address;
   timestamp: number | bigint;
 };
 
 export function getRoverSweptEventEncoder(): FixedSizeEncoder<RoverSweptEventArgs> {
   return getStructEncoder([
     ['amount', getU64Encoder()],
+    ['monkeShare', getU64Encoder()],
+    ['operatorShare', getU64Encoder()],
     ['distPool', getAddressEncoder()],
+    ['bot', getAddressEncoder()],
     ['timestamp', getI64Encoder()],
   ]);
 }
@@ -45,7 +54,10 @@ export function getRoverSweptEventEncoder(): FixedSizeEncoder<RoverSweptEventArg
 export function getRoverSweptEventDecoder(): FixedSizeDecoder<RoverSweptEvent> {
   return getStructDecoder([
     ['amount', getU64Decoder()],
+    ['monkeShare', getU64Decoder()],
+    ['operatorShare', getU64Decoder()],
     ['distPool', getAddressDecoder()],
+    ['bot', getAddressDecoder()],
     ['timestamp', getI64Decoder()],
   ]);
 }

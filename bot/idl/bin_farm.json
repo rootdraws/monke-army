@@ -156,6 +156,12 @@
           "writable": true
         },
         {
+          "name": "token_x_mint"
+        },
+        {
+          "name": "token_y_mint"
+        },
+        {
           "name": "token_x_program"
         },
         {
@@ -2053,8 +2059,8 @@
     {
       "name": "sweep_rover",
       "docs": [
-        "Sweep SOL from rover_authority to dist_pool. Permissionless — anyone can call.",
-        "This is how rover harvest proceeds reach monke holders via the accumulator."
+        "Sweep SOL from rover_authority — 50% to dist_pool (monke holders), 50% to bot (operations).",
+        "Hardcoded split. Permissionless — anyone can call."
       ],
       "discriminator": [
         199,
@@ -2124,9 +2130,10 @@
         },
         {
           "name": "revenue_dest",
-          "docs": [
-            "Reject executable accounts (prevents irretrievable SOL)"
-          ],
+          "writable": true
+        },
+        {
+          "name": "bot_dest",
           "writable": true
         }
       ],
@@ -2905,6 +2912,16 @@
       "code": 6029,
       "name": "EmergencyCloseTimelockNotExpired",
       "msg": "Emergency close timelock not expired (24 hours required)"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidMintData",
+      "msg": "Invalid mint account data (too short to read decimals)"
+    },
+    {
+      "code": 6031,
+      "name": "InvalidBot",
+      "msg": "Invalid bot destination"
     }
   ],
   "types": [
@@ -3323,7 +3340,7 @@
       "name": "RoverAuthority",
       "docs": [
         "Rover authority PDA — owns rover (bribe) positions.",
-        "Harvest proceeds accumulate here. sweep_rover sends SOL to revenue_dest (dist_pool — 100% to monke holders)."
+        "Harvest proceeds accumulate here. sweep_rover splits SOL 50/50: half to revenue_dest (dist_pool), half to Config.bot."
       ],
       "type": {
         "kind": "struct",
@@ -3418,7 +3435,19 @@
             "type": "u64"
           },
           {
+            "name": "monke_share",
+            "type": "u64"
+          },
+          {
+            "name": "operator_share",
+            "type": "u64"
+          },
+          {
             "name": "dist_pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "bot",
             "type": "pubkey"
           },
           {

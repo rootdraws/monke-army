@@ -8,7 +8,7 @@
  *
  * The bot never holds user funds or revenue SOL.
  * Revenue SOL flows: rover_authority → dist_pool PDA → monke holders (on-chain).
- * 100% to monke holders. No splitter, no dev split.
+ * 50/50 split: half to monke holders, half to bot (Config.bot). Hardcoded in sweep_rover.
  * The bot only cranks permissionless instructions.
  *
  * Weekly cadence: Saturday keeper sequence (claim → unwrap WSOL → sweep → fee rovers → deposit → cleanup).
@@ -142,6 +142,8 @@ class HarvestBot {
   private lastKeeperRunAt: number | null = null;
   private healthServer: http.Server | null = null;
   private lastKnownBalance: number | null = null;
+  private startingBalance: number | null = null;
+  private balanceHistory: { timestamp: number; lamports: number }[] = [];
 
   constructor() {
     this.connection = new Connection(RPC_URL!, { commitment: COMMITMENT });
@@ -165,6 +167,58 @@ class HarvestBot {
 
     logger.info('Shutdown complete.');
     process.exit(0);
+  }
+
+  private recordBalance(lamports: number): void {
+    this.balanceHistory.push({ timestamp: Date.now(), lamports });
+    // Keep last 288 samples (~24h at 5min intervals)
+    if (this.balanceHistory.length > 288) this.balanceHistory.shift();
+  }
+
+  getBotWalletInfo() {
+    const now = Date.now();
+    const uptimeMs = now - this.startTime;
+    const currentBalance = this.lastKnownBalance ?? 0;
+    const startBal = this.startingBalance ?? currentBalance;
+    const netSpent = startBal - currentBalance;
+
+    // Compute spend rate from balance history (SOL/hour)
+    let spendRatePerHour: number | null = null;
+    if (this.balanceHistory.length >= 2) {
+      const oldest = this.balanceHistory[0];
+      const newest = this.balanceHistory[this.balanceHistory.length - 1];
+      const elapsedHours = (newest.timestamp - oldest.timestamp) / 3_600_000;
+      if (elapsedHours > 0) {
+        spendRatePerHour = (oldest.lamports - newest.lamports) / 1e9 / elapsedHours;
+      }
+    }
+
+    // Estimate hours remaining at current spend rate
+    let estimatedHoursRemaining: number | null = null;
+    if (spendRatePerHour !== null && spendRatePerHour > 0) {
+      estimatedHoursRemaining = Math.round((currentBalance / 1e9) / spendRatePerHour * 10) / 10;
+    }
+
+    return {
+      address: botKeypair.publicKey.toBase58(),
+      balanceSol: currentBalance / 1e9,
+      balanceLamports: currentBalance,
+      startingBalanceSol: startBal / 1e9,
+      netSpentSol: Math.round(netSpent / 1e6) / 1e3, // 3 decimal places
+      uptimeHours: Math.round(uptimeMs / 3_600_000 * 10) / 10,
+      spendRatePerHour,
+      estimatedHoursRemaining,
+      warnThresholdSol: SOL_BALANCE_WARN / 1e9,
+      criticalThresholdSol: SOL_BALANCE_CRITICAL / 1e9,
+      status: currentBalance < SOL_BALANCE_CRITICAL ? 'critical'
+            : currentBalance < SOL_BALANCE_WARN ? 'warning'
+            : 'healthy',
+      txCounts: {
+        harvests: this.executor?.totalHarvests ?? 0,
+        closes: this.executor?.totalCloses ?? 0,
+      },
+      samples: this.balanceHistory.length,
+    };
   }
 
   private startHealthServer(): void {
@@ -246,6 +300,8 @@ class HarvestBot {
     // Check bot SOL balance
     const botBalance = await this.connection.getBalance(botKeypair.publicKey);
     this.lastKnownBalance = botBalance;
+    this.startingBalance = botBalance;
+    this.recordBalance(botBalance);
     if (botBalance < SOL_BALANCE_CRITICAL) {
       logger.error(`[bot] CRITICAL: Bot SOL balance ${botBalance / 1e9} SOL — below ${SOL_BALANCE_CRITICAL / 1e9} threshold`);
     } else if (botBalance < SOL_BALANCE_WARN) {
@@ -383,7 +439,7 @@ class HarvestBot {
     this.startHealthServer();
 
     // Initialize relay server (WebSocket + REST) on the same HTTP server
-    this.relay = new RelayServer(this.subscriber, this.executor, this.keeper);
+    this.relay = new RelayServer(this.subscriber, this.executor, this.keeper, () => this.getBotWalletInfo());
     if (this.healthServer) {
       this.relay.attach(this.healthServer);
       logger.info(`[relay] WebSocket relay on :${HEALTH_PORT}/ws, REST on :${HEALTH_PORT}/api/*`);
@@ -434,6 +490,7 @@ class HarvestBot {
         try {
           const bal = await this.connection.getBalance(botKeypair.publicKey);
           this.lastKnownBalance = bal;
+          this.recordBalance(bal);
           if (bal < SOL_BALANCE_CRITICAL) {
             logger.error(`[bot] CRITICAL: Bot SOL balance ${bal / 1e9} SOL — below ${SOL_BALANCE_CRITICAL / 1e9} threshold`);
           } else if (bal < SOL_BALANCE_WARN) {

@@ -2504,10 +2504,20 @@ async function handleCrankSweep() {
   try {
     const [distPoolPDA] = getDistPoolPDA();
 
+    const [configPDA] = solanaWeb3.PublicKey.findProgramAddressSync(
+      [new TextEncoder().encode('config')],
+      new solanaWeb3.PublicKey(CONFIG.CORE_PROGRAM_ID)
+    );
+    const configInfo = await conn.getAccountInfo(configPDA);
+    if (!configInfo) { showToast('Config account not found', 'error'); return; }
+    const configDecoded = decodeConfig(toEncodedAccount(configPDA, configInfo.data, BIN_FARM_PROGRAM_ADDRESS));
+    const botAddress = configDecoded.data.bot;
+
     const tx = new solanaWeb3.Transaction();
     const sweepIx = await getSweepRoverInstructionAsync({
       caller: asSigner(user),
       revenueDest: address(distPoolPDA.toBase58()),
+      botDest: botAddress,
     });
     tx.add(kitIxToWeb3(sweepIx));
 
@@ -2519,7 +2529,7 @@ async function handleCrankSweep() {
     const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
     showToast('Confirming sweep...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
-    showToast('Swept SOL to dist pool!', 'success');
+    showToast('Swept SOL — 50% to dist pool, 50% to bot!', 'success');
     renderOpsStats();
   } catch (err) {
     console.error('[monke] sweep_rover failed:', err);

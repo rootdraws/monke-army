@@ -8,14 +8,14 @@ Managed Meteora DLMM positions with sub-second bin harvesting via Helius LaserSt
 
 | Program | Description |
 |---------|-------------|
-| `core.rs` | Position management. Open, harvest, close. All CPI via V2 variants (Token-2022 native). Performance fee on converted output — SOL fees → rover_authority → dist_pool, TOKEN fees → rover_authority (BidAskImBalanced DLMM recycling, no market dump). `claim_pool_fees` for DAMM v2 trading fee collection. Permissionless fallback on harvest + close (heartbeat + staleness). Rovers use BidAskImBalanced distribution. Emergency escape hatch for deprecated pools. |
-| `monke_bananas.rs` | Feed BANANAS to your Monke. Burn $BANANAS (1M per tx, unlimited stacking) against SMB Gen2 (2x weight) or Gen3 (1x weight) NFTs. MasterChef accumulator. 100% of all fees flow to fed monke holders. `compost_monke`: permissionless cleanup of burned NFTs. |
+| `core.rs` | Position management. Open, harvest, close. All CPI via V2 variants (Token-2022 native). Performance fee on converted output — all fees → rover_authority → `sweep_rover` splits 50/50 (dist_pool + Config.bot). TOKEN fees → rover_authority (BidAskImBalanced DLMM recycling, no market dump). `claim_pool_fees` for DAMM v2 trading fee collection. Permissionless fallback on harvest + close (heartbeat + staleness). Rovers use BidAskImBalanced distribution. Emergency escape hatch for deprecated pools. |
+| `monke_bananas.rs` | Feed BANANAS to your Monke. Burn $BANANAS (1M per tx, unlimited stacking) against SMB Gen2 (2x weight) or Gen3 (1x weight) NFTs. MasterChef accumulator. 50% of all fees flow to fed monke holders (50% to bot operations). `compost_monke`: permissionless cleanup of burned NFTs. |
 
 ## How It Works
 
 Users deposit single-sided liquidity into Meteora DLMM bins via the core program — sell the rips (tokens above price) or buy the dips (SOL below price). A vault PDA owns the Meteora position on behalf of the user. As price moves through bins, Monke's Harvester detects fully-converted bins in sub-second via Helius LaserStream gRPC and calls `harvest_bins` to withdraw them. Tokens flow Meteora → vault ATA → owner wallet in a single instruction.
 
-Performance fee (0.3%) is taken on converted output only. All fees flow through rover_authority directly to dist_pool — 100% to monke holders. No splitter, no dev fee, no governance. TOKEN fees route to rover_authority for BidAskImBalanced DLMM recycling — no market dumping on thin meme pools. DAMM v2 $BANANAS/SOL trading fees are claimed via `claim_pool_fees` through rover_authority. Unconverted deposits return untaxed.
+Performance fee (0.3%) is taken on converted output only. All fees flow through rover_authority. `sweep_rover` splits 50/50: half to dist_pool (monke holders), half to `Config.bot` (operations). Hardcoded on-chain. TOKEN fees route to rover_authority for BidAskImBalanced DLMM recycling — no market dumping on thin meme pools. DAMM v2 $BANANAS/SOL trading fees are claimed via `claim_pool_fees` through rover_authority. Unconverted deposits return untaxed.
 
 ### Key Instructions
 
@@ -26,7 +26,7 @@ open_position_v2(pool, amount, min_bin, max_bin, side, max_active_bin_slippage)
   → Token-2022 native. All CPI via V2 variants.
 
 harvest_bins(bin_ids: Vec<i32>)
-  → SOL fees → rover_authority → dist_pool (100% to monke holders). TOKEN fees → rover_authority (DLMM recycling)
+  → SOL fees → rover_authority → sweep_rover → 50% dist_pool (monke holders) + 50% bot. TOKEN fees → rover_authority (DLMM recycling)
   → Remainder → owner. Position stays open.
   → Permissionless fallback: anyone can call when bot is stale (~40s),
     earns keeper_tip_bps (10%) of the fee.
@@ -56,7 +56,7 @@ open_fee_rover(amount, bin_step)
     in rover_authority ATAs. Bot pays rent.
 
 sweep_rover()
-  → Permissionless. SOL from rover_authority → dist_pool (100% to monke holders).
+  → Permissionless. SOL from rover_authority → 50% dist_pool (monke holders) + 50% Config.bot (operations).
 
 close_rover_token_account()
   → Permissionless. Closes any token account owned by rover_authority.
@@ -66,7 +66,7 @@ close_rover_token_account()
 claim_pool_fees()
   → Permissionless. Claims DAMM v2 trading fees to rover_authority.
   → CPI into DAMM v2 program, rover_authority PDA signs as position owner.
-  → SOL accumulates in rover_authority → sweep_rover moves it to dist_pool.
+  → SOL accumulates in rover_authority → sweep_rover splits 50/50 (dist_pool + Config.bot).
 ```
 
 ### Bin Detection Logic — Sell the Rips, Buy the Dips
@@ -117,7 +117,9 @@ bin-farm/
 ├── scripts/
 │   ├── deploy-and-init.mjs        # Deploy + init atomically (anti-front-run)
 │   ├── build-frontend.mjs         # Frontend build: bundle app.js (Codama + @solana/kit) + enlist.js
-│   └── generate-clients.mjs       # Codama client generation from IDL → src/generated/
+│   ├── generate-clients.mjs       # Codama client generation from IDL → src/generated/
+│   ├── test-close-position.ts     # E2E test: close a stuck position (mainnet)
+│   └── recycle-fee-rover.ts       # Open fee rover from accumulated token fees in rover_authority
 ├── meteora-invent/                # Meteora DAMM v2 launch toolkit (cloned)
 │   └── studio/config/damm_v2_config.jsonc  # $BANANAS pool + Alpha Vault config (locked params)
 ├── Anchor.toml                    # Workspace config (2 programs, devnet + mainnet)
@@ -182,7 +184,7 @@ Required env vars: `RPC_URL`, `GRPC_ENDPOINT`, `BOT_KEYPAIR_PATH`, `CORE_PROGRAM
 Saturday sequence:
 1. Claim DAMM v2 pool trading fees → rover_authority
 2. Close WSOL ATAs on rover_authority (unwrap to native SOL)
-3. Sweep SOL from rover_authority → dist_pool
+3. Sweep SOL from rover_authority → 50% dist_pool + 50% Config.bot
 4. Open fee rover positions from accumulated token fees (BidAskImBalanced DLMM)
 5. Deposit SOL from dist_pool → monke program vault → accumulator
 6. Close exhausted rover positions (reclaim rent)
@@ -251,15 +253,15 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page),
 - **Gen3 Collection:** `8Rt3Ayqth4DAiPnW9MDFi63TiQJHmohfTWLMQFHi4KZH` — **1x weight per feed**
 - **Burn:** 1,000,000 $BANANAS per `feed_monke` call (6 decimals enforced at init)
 - **Stacking:** Unlimited. Per-NFT `MonkeBurn` PDA tracks cumulative weight.
-- **Revenue:** 100% of all protocol fees + all rover proceeds + DAMM v2 trading fees flow to fed monke holders
+- **Revenue:** 50% of all protocol fees + rover proceeds + DAMM v2 trading fees flow to fed monke holders. 50% funds bot operations.
 - **Claiming:** Weight and unclaimed SOL travel with the NFT on secondary sales.
 - **Cleanup:** `compost_monke` — permissionless removal of dead weight when NFT is burned (supply == 0)
 
 ## Known Limitations
 
-- **Token-2022 outbound transfer CPI (in progress):** Account validation accepts Token-2022 mints/ATAs, and all Meteora CPIs succeed. However, the program's own outbound transfers (fee routing, owner payouts) use `anchor_spl::token::transfer` which fails for Token-2022 accounts. Fix in progress: migrate to `anchor_spl::token_interface::transfer_checked`. SPL Token-only pools work end-to-end. See `TODO.md` BLOCKER section.
+- **Token-2022 fully supported (Feb 23).** All outbound transfers use `anchor_spl::token_interface::transfer_checked`, dispatching to whichever token program owns the account. SPL Token and Token-2022 pools both work end-to-end.
 
-- **Token-2022 Transfer Fee mints:** Once the transfer CPI fix lands, tokens with the Transfer Fee extension will work end-to-end, but the recipient receives slightly less than displayed. The protocol's delta-based fee calculation is accurate, but downstream transfers also incur the token's built-in transfer fee. Economic impact bounded by the token's fee rate (typically <2%).
+- **Token-2022 Transfer Fee mints:** Tokens with the Transfer Fee extension work end-to-end, but the recipient receives slightly less than displayed. The protocol's delta-based fee calculation is accurate, but downstream transfers also incur the token's built-in transfer fee. Economic impact bounded by the token's fee rate (typically <2%).
 
 - **Token-2022 Transfer Hook mints:** Mints with the Transfer Hook extension are **not supported**. Transfer hook extra accounts are not resolved (`RemainingAccountsInfo::empty_hooks()` used everywhere). Add when demand exists.
 

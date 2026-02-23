@@ -55,6 +55,8 @@ export type ApplyEmergencyCloseInstruction<
   TAccountVaultTokenY extends string | AccountMeta<string> = string,
   TAccountOwnerTokenX extends string | AccountMeta<string> = string,
   TAccountOwnerTokenY extends string | AccountMeta<string> = string,
+  TAccountTokenXMint extends string | AccountMeta<string> = string,
+  TAccountTokenYMint extends string | AccountMeta<string> = string,
   TAccountTokenXProgram extends string | AccountMeta<string> = string,
   TAccountTokenYProgram extends string | AccountMeta<string> = string,
   TAccountMemoProgram extends string | AccountMeta<string> = string,
@@ -93,6 +95,12 @@ export type ApplyEmergencyCloseInstruction<
       TAccountOwnerTokenY extends string
         ? WritableAccount<TAccountOwnerTokenY>
         : TAccountOwnerTokenY,
+      TAccountTokenXMint extends string
+        ? ReadonlyAccount<TAccountTokenXMint>
+        : TAccountTokenXMint,
+      TAccountTokenYMint extends string
+        ? ReadonlyAccount<TAccountTokenYMint>
+        : TAccountTokenYMint,
       TAccountTokenXProgram extends string
         ? ReadonlyAccount<TAccountTokenXProgram>
         : TAccountTokenXProgram,
@@ -151,6 +159,8 @@ export type ApplyEmergencyCloseAsyncInput<
   TAccountVaultTokenY extends string = string,
   TAccountOwnerTokenX extends string = string,
   TAccountOwnerTokenY extends string = string,
+  TAccountTokenXMint extends string = string,
+  TAccountTokenYMint extends string = string,
   TAccountTokenXProgram extends string = string,
   TAccountTokenYProgram extends string = string,
   TAccountMemoProgram extends string = string,
@@ -165,6 +175,8 @@ export type ApplyEmergencyCloseAsyncInput<
   vaultTokenY: Address<TAccountVaultTokenY>;
   ownerTokenX: Address<TAccountOwnerTokenX>;
   ownerTokenY: Address<TAccountOwnerTokenY>;
+  tokenXMint: Address<TAccountTokenXMint>;
+  tokenYMint: Address<TAccountTokenYMint>;
   tokenXProgram: Address<TAccountTokenXProgram>;
   tokenYProgram: Address<TAccountTokenYProgram>;
   memoProgram: Address<TAccountMemoProgram>;
@@ -181,6 +193,8 @@ export async function getApplyEmergencyCloseInstructionAsync<
   TAccountVaultTokenY extends string,
   TAccountOwnerTokenX extends string,
   TAccountOwnerTokenY extends string,
+  TAccountTokenXMint extends string,
+  TAccountTokenYMint extends string,
   TAccountTokenXProgram extends string,
   TAccountTokenYProgram extends string,
   TAccountMemoProgram extends string,
@@ -197,6 +211,8 @@ export async function getApplyEmergencyCloseInstructionAsync<
     TAccountVaultTokenY,
     TAccountOwnerTokenX,
     TAccountOwnerTokenY,
+    TAccountTokenXMint,
+    TAccountTokenYMint,
     TAccountTokenXProgram,
     TAccountTokenYProgram,
     TAccountMemoProgram,
@@ -215,6 +231,8 @@ export async function getApplyEmergencyCloseInstructionAsync<
     TAccountVaultTokenY,
     TAccountOwnerTokenX,
     TAccountOwnerTokenY,
+    TAccountTokenXMint,
+    TAccountTokenYMint,
     TAccountTokenXProgram,
     TAccountTokenYProgram,
     TAccountMemoProgram,
@@ -235,6 +253,8 @@ export async function getApplyEmergencyCloseInstructionAsync<
     vaultTokenY: { value: input.vaultTokenY ?? null, isWritable: true },
     ownerTokenX: { value: input.ownerTokenX ?? null, isWritable: true },
     ownerTokenY: { value: input.ownerTokenY ?? null, isWritable: true },
+    tokenXMint: { value: input.tokenXMint ?? null, isWritable: false },
+    tokenYMint: { value: input.tokenYMint ?? null, isWritable: false },
     tokenXProgram: { value: input.tokenXProgram ?? null, isWritable: false },
     tokenYProgram: { value: input.tokenYProgram ?? null, isWritable: false },
     memoProgram: { value: input.memoProgram ?? null, isWritable: false },
@@ -271,6 +291,8 @@ export async function getApplyEmergencyCloseInstructionAsync<
       getAccountMeta(accounts.vaultTokenY),
       getAccountMeta(accounts.ownerTokenX),
       getAccountMeta(accounts.ownerTokenY),
+      getAccountMeta(accounts.tokenXMint),
+      getAccountMeta(accounts.tokenYMint),
       getAccountMeta(accounts.tokenXProgram),
       getAccountMeta(accounts.tokenYProgram),
       getAccountMeta(accounts.memoProgram),
@@ -289,6 +311,8 @@ export async function getApplyEmergencyCloseInstructionAsync<
     TAccountVaultTokenY,
     TAccountOwnerTokenX,
     TAccountOwnerTokenY,
+    TAccountTokenXMint,
+    TAccountTokenYMint,
     TAccountTokenXProgram,
     TAccountTokenYProgram,
     TAccountMemoProgram,
@@ -306,6 +330,8 @@ export type ApplyEmergencyCloseInput<
   TAccountVaultTokenY extends string = string,
   TAccountOwnerTokenX extends string = string,
   TAccountOwnerTokenY extends string = string,
+  TAccountTokenXMint extends string = string,
+  TAccountTokenYMint extends string = string,
   TAccountTokenXProgram extends string = string,
   TAccountTokenYProgram extends string = string,
   TAccountMemoProgram extends string = string,
@@ -320,6 +346,8 @@ export type ApplyEmergencyCloseInput<
   vaultTokenY: Address<TAccountVaultTokenY>;
   ownerTokenX: Address<TAccountOwnerTokenX>;
   ownerTokenY: Address<TAccountOwnerTokenY>;
+  tokenXMint: Address<TAccountTokenXMint>;
+  tokenYMint: Address<TAccountTokenYMint>;
   tokenXProgram: Address<TAccountTokenXProgram>;
   tokenYProgram: Address<TAccountTokenYProgram>;
   memoProgram: Address<TAccountMemoProgram>;
@@ -336,6 +364,8 @@ export function getApplyEmergencyCloseInstruction<
   TAccountVaultTokenY extends string,
   TAccountOwnerTokenX extends string,
   TAccountOwnerTokenY extends string,
+  TAccountTokenXMint extends string,
+  TAccountTokenYMint extends string,
   TAccountTokenXProgram extends string,
   TAccountTokenYProgram extends string,
   TAccountMemoProgram extends string,
@@ -352,6 +382,8 @@ export function getApplyEmergencyCloseInstruction<
     TAccountVaultTokenY,
     TAccountOwnerTokenX,
     TAccountOwnerTokenY,
+    TAccountTokenXMint,
+    TAccountTokenYMint,
     TAccountTokenXProgram,
     TAccountTokenYProgram,
     TAccountMemoProgram,
@@ -369,6 +401,8 @@ export function getApplyEmergencyCloseInstruction<
   TAccountVaultTokenY,
   TAccountOwnerTokenX,
   TAccountOwnerTokenY,
+  TAccountTokenXMint,
+  TAccountTokenYMint,
   TAccountTokenXProgram,
   TAccountTokenYProgram,
   TAccountMemoProgram,
@@ -388,6 +422,8 @@ export function getApplyEmergencyCloseInstruction<
     vaultTokenY: { value: input.vaultTokenY ?? null, isWritable: true },
     ownerTokenX: { value: input.ownerTokenX ?? null, isWritable: true },
     ownerTokenY: { value: input.ownerTokenY ?? null, isWritable: true },
+    tokenXMint: { value: input.tokenXMint ?? null, isWritable: false },
+    tokenYMint: { value: input.tokenYMint ?? null, isWritable: false },
     tokenXProgram: { value: input.tokenXProgram ?? null, isWritable: false },
     tokenYProgram: { value: input.tokenYProgram ?? null, isWritable: false },
     memoProgram: { value: input.memoProgram ?? null, isWritable: false },
@@ -416,6 +452,8 @@ export function getApplyEmergencyCloseInstruction<
       getAccountMeta(accounts.vaultTokenY),
       getAccountMeta(accounts.ownerTokenX),
       getAccountMeta(accounts.ownerTokenY),
+      getAccountMeta(accounts.tokenXMint),
+      getAccountMeta(accounts.tokenYMint),
       getAccountMeta(accounts.tokenXProgram),
       getAccountMeta(accounts.tokenYProgram),
       getAccountMeta(accounts.memoProgram),
@@ -434,6 +472,8 @@ export function getApplyEmergencyCloseInstruction<
     TAccountVaultTokenY,
     TAccountOwnerTokenX,
     TAccountOwnerTokenY,
+    TAccountTokenXMint,
+    TAccountTokenYMint,
     TAccountTokenXProgram,
     TAccountTokenYProgram,
     TAccountMemoProgram,
@@ -456,10 +496,12 @@ export type ParsedApplyEmergencyCloseInstruction<
     vaultTokenY: TAccountMetas[6];
     ownerTokenX: TAccountMetas[7];
     ownerTokenY: TAccountMetas[8];
-    tokenXProgram: TAccountMetas[9];
-    tokenYProgram: TAccountMetas[10];
-    memoProgram: TAccountMetas[11];
-    systemProgram: TAccountMetas[12];
+    tokenXMint: TAccountMetas[9];
+    tokenYMint: TAccountMetas[10];
+    tokenXProgram: TAccountMetas[11];
+    tokenYProgram: TAccountMetas[12];
+    memoProgram: TAccountMetas[13];
+    systemProgram: TAccountMetas[14];
   };
   data: ApplyEmergencyCloseInstructionData;
 };
@@ -472,7 +514,7 @@ export function parseApplyEmergencyCloseInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>
 ): ParsedApplyEmergencyCloseInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 13) {
+  if (instruction.accounts.length < 15) {
     // TODO: Coded error.
     throw new Error('Not enough accounts');
   }
@@ -494,6 +536,8 @@ export function parseApplyEmergencyCloseInstruction<
       vaultTokenY: getNextAccount(),
       ownerTokenX: getNextAccount(),
       ownerTokenY: getNextAccount(),
+      tokenXMint: getNextAccount(),
+      tokenYMint: getNextAccount(),
       tokenXProgram: getNextAccount(),
       tokenYProgram: getNextAccount(),
       memoProgram: getNextAccount(),

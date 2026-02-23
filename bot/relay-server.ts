@@ -56,6 +56,7 @@ export class RelayServer {
   private subscriber: GeyserSubscriber;
   private executor: HarvestExecutor;
   private keeper: MonkeKeeper;
+  private botWalletProvider: (() => any) | null;
 
   // Rover TVL cache (computed by keeper, exposed via REST)
   private roverTvl: Map<string, RoverTvlEntry> = new Map();
@@ -68,10 +69,12 @@ export class RelayServer {
     subscriber: GeyserSubscriber,
     executor: HarvestExecutor,
     keeper: MonkeKeeper,
+    botWalletProvider?: () => any,
   ) {
     this.subscriber = subscriber;
     this.executor = executor;
     this.keeper = keeper;
+    this.botWalletProvider = botWalletProvider ?? null;
   }
 
   /**
@@ -172,6 +175,8 @@ export class RelayServer {
           return this.handleRoversTop5(res);
         case '/api/stats':
           return this.handleStats(res);
+        case '/api/bot-wallet':
+          return this.handleBotWallet(res);
         default:
           // Check for /api/pools/{address}
           if (path.startsWith('/api/pools/')) {
@@ -331,6 +336,15 @@ export class RelayServer {
       roverTotalTvl: [...this.roverTvl.values()].reduce((sum, r) => sum + r.tvl, 0),
       wsClients: this.clients.size,
     });
+    return true;
+  }
+
+  private handleBotWallet(res: ServerResponse): boolean {
+    if (!this.botWalletProvider) {
+      this.json(res, 503, { error: 'Bot wallet info not available' });
+      return true;
+    }
+    this.json(res, 200, this.botWalletProvider());
     return true;
   }
 

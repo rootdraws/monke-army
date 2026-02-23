@@ -2,46 +2,19 @@
 
 ---
 
-## BLOCKER — Token-2022 transfer CPI fix (program change required)
+## RESOLVED — Token-2022 transfer CPI fix (Feb 23, session 3)
 
-Position `3qQGCmDY` on pool `ABdAmqgz3CNvU9kjn5fAtnFurvBvgs6PP7ksTb3VfzQM` is stuck. Token X is `79hW22KCd32YsJA59pWU5Y2Wthuchb5GsmZCT8v4pump` (Token-2022, flag=1). Token Y is SOL (SPL Token).
+- [x] **Fix transfer CPI for Token-2022** — Replaced `anchor_spl::token::{Transfer, transfer}` with `anchor_spl::token_interface::{TransferChecked, transfer_checked}` at all **14** call sites (6 in `harvest_bins`, 2 in `claim_fees`, 2 in `apply_emergency_close`, 4 in `execute_close_transfers`). Added `read_mint_decimals()` helper. Added `token_x_mint`/`token_y_mint` to `ApplyEmergencyClose` context. Deployed to mainnet (`xvvSGjb...`). Verified: stuck Token-2022 position `3qQGCmDY` closed successfully (`4bn2uPU...`). First fee revenue (85.8M raw Token X) routed to rover_authority and recycled into BidAskImBalanced DLMM via `open_fee_rover` (`yUWvbdi...`).
+- [x] **Fee rover CU fix** — Keeper's `openFeeRover` CU budget bumped from 400K to 1M in `bot/keeper.ts`. `AddLiquidityByStrategy2` with 69 bins exceeded 400K.
+- [x] **Bot wallet monitoring** — Added `/api/bot-wallet` endpoint to relay (`bot/relay-server.ts`). Returns: balance, spend rate/hour, estimated hours remaining, net spent since startup, status (healthy/warning/critical). Balance history tracked in orchestrator (288-sample rolling window).
+- [x] **Recycle script** — `scripts/recycle-fee-rover.ts`: standalone script to open fee rover positions from accumulated token fees. Takes optional pool address argument.
 
-**What works:** Account validation passes (Feb 23 fix — `InterfaceAccount` for token accounts, `UncheckedAccount` for mints). All 3 Meteora CPIs succeed (`RemoveLiquidityByRange2`, `ClaimFee2`, `ClosePosition2`). Owner + rover ATAs are pre-created correctly by the bot.
+---
 
-**What fails:** After Meteora CPIs, the program's own outbound transfers fail. `anchor_spl::token::transfer()` generates an SPL Token `Transfer` instruction, but the token accounts are owned by Token-2022. SPL Token can't read Token-2022 account data → `InvalidAccountData`.
+## RESOLVED — 50/50 fee split (Feb 23, session 4)
 
-**Evidence (from `npx tsx scripts/test-close-position.ts`):**
-```
-Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
-Program log: Instruction: Transfer
-Program log: Error: InvalidAccountData
-Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: invalid account data for instruction
-```
-
-**Fix:** In `programs/bin-farm/src/lib.rs`, replace all 8 `transfer()` call sites with `transfer_checked()` from `anchor_spl::token_interface`:
-
-1. Change import (line 17): `use anchor_spl::token::{Transfer, transfer};` → `use anchor_spl::token_interface::{TransferChecked, transfer_checked};`
-2. Each call site changes from:
-```rust
-transfer(CpiContext::new_with_signer(
-    token_x_program.to_account_info(),
-    Transfer { from, to, authority }, signer,
-), amount)?;
-```
-to:
-```rust
-transfer_checked(CpiContext::new_with_signer(
-    token_x_program.to_account_info(),
-    TransferChecked { from, mint: token_x_mint.to_account_info(), to, authority }, signer,
-), amount, decimals)?;
-```
-3. The `mint` and `decimals` parameters must be threaded to `execute_close_transfers` and the harvest/emergency-close handlers. Get decimals from the mint account (read on-chain) or hardcode a lookup.
-4. **8 call sites** at lines: 897, 908, 1107, 1120, 1844, 1855, 1866, 1877.
-5. Rebuild: `PATH="$HOME/.cargo/bin:$PATH" cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml`
-6. Deploy: `solana program deploy target/deploy/bin_farm.so --program-id 8FJyoK7UKhYB8qd8187oVWFngQ5ZoVPbNWXSUeZSdgia --url mainnet-beta`
-7. Verify: `npx tsx scripts/test-close-position.ts` — should print `SUCCESS` with a tx signature.
-
-- [ ] **Fix transfer CPI for Token-2022** — Replace `anchor_spl::token::{Transfer, transfer}` with `anchor_spl::token_interface::{TransferChecked, transfer_checked}` at all 8 call sites. Thread mint accounts + decimals. Rebuild + redeploy.
+- [x] **Hardcoded 50/50 sweep split** — `sweep_rover` in `lib.rs` now splits all swept SOL: 50% to `revenue_dest` (dist_pool → monke holders), 50% to `Config.bot` (operations). `SweepRover` context gained `bot_dest` account (validated against `Config.bot`). `RoverSweptEvent` emits `monke_share`, `operator_share`, `bot`. `InvalidBot` error added. Bot keeper (`keeper.ts`) and frontend (`app.js`) updated to pass `botDest`. IDL regenerated. All docs, comments, and HTML updated. Effective user cost: 0.15% (half of 0.3% fee).
+- [x] **Anchor.toml solana_version sync** — Updated from `2.1.0` to `3.0.15` to match installed Solana CLI. Required for `anchor idl build`.
 
 ---
 
@@ -85,7 +58,7 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 - [ ] **Wait for harvest** — Watch Ops activity feed. Bot harvests when price crosses bins.
 - [ ] **Test user_close** — Positions page, click "close". Approve. Verify SOL returns minus 0.3% fee.
 - [ ] **Test claim_fees** — Open position, wait for LP fees to accrue, click "fees" on Positions page.
-- [ ] **Test sweep** — Ops page, check rover_authority balance. If > 0, click "sweep". Verify SOL moves to dist_pool.
+- [ ] **Test sweep** — Ops page, check rover_authority balance. If > 0, click "sweep". Verify SOL splits 50/50: half to dist_pool, half to Config.bot.
 - [ ] **Test deposit** — Ops page, check dist_pool balance. If > 0, click "deposit". Verify SOL moves to program_vault.
 - [ ] **Test feed_monke** — Rank page, select SMB NFT, click "Burn 1M $BANANAS to your Monke." Verify weight increments.
 - [ ] **Test claim** — After deposit_sol, click "claim" on fed monke. Verify SOL arrives.
@@ -126,4 +99,4 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
 ---
 
-*Last updated: Feb 23, 2026 (session 2).*
+*Last updated: Feb 23, 2026 (session 4).*

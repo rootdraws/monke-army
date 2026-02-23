@@ -74,6 +74,10 @@ export const BIN_FARM_ERROR__PRIORITY_SLOTS_EXCEED_MAX = 0x178b; // 6027
 export const BIN_FARM_ERROR__NO_PENDING_EMERGENCY_CLOSE = 0x178c; // 6028
 /** EmergencyCloseTimelockNotExpired: Emergency close timelock not expired (24 hours required) */
 export const BIN_FARM_ERROR__EMERGENCY_CLOSE_TIMELOCK_NOT_EXPIRED = 0x178d; // 6029
+/** InvalidMintData: Invalid mint account data (too short to read decimals) */
+export const BIN_FARM_ERROR__INVALID_MINT_DATA = 0x178e; // 6030
+/** InvalidBot: Invalid bot destination */
+export const BIN_FARM_ERROR__INVALID_BOT = 0x178f; // 6031
 
 export type BinFarmError =
   | typeof BIN_FARM_ERROR__BIN_OUT_OF_POSITION_RANGE
@@ -83,7 +87,9 @@ export type BinFarmError =
   | typeof BIN_FARM_ERROR__FEE_TIMELOCK_NOT_EXPIRED
   | typeof BIN_FARM_ERROR__FEE_TOO_HIGH
   | typeof BIN_FARM_ERROR__INVALID_BIN_RANGE
+  | typeof BIN_FARM_ERROR__INVALID_BOT
   | typeof BIN_FARM_ERROR__INVALID_DIST_POOL
+  | typeof BIN_FARM_ERROR__INVALID_MINT_DATA
   | typeof BIN_FARM_ERROR__INVALID_POOL
   | typeof BIN_FARM_ERROR__INVALID_POSITION
   | typeof BIN_FARM_ERROR__INVALID_PROGRAM
@@ -117,7 +123,9 @@ if (process.env.NODE_ENV !== 'production') {
     [BIN_FARM_ERROR__FEE_TIMELOCK_NOT_EXPIRED]: `Fee timelock not expired (24 hours required)`,
     [BIN_FARM_ERROR__FEE_TOO_HIGH]: `Fee too high (max 10%)`,
     [BIN_FARM_ERROR__INVALID_BIN_RANGE]: `Invalid bin range (min must be <= max)`,
+    [BIN_FARM_ERROR__INVALID_BOT]: `Invalid bot destination`,
     [BIN_FARM_ERROR__INVALID_DIST_POOL]: `dist_pool cannot be the null address`,
+    [BIN_FARM_ERROR__INVALID_MINT_DATA]: `Invalid mint account data (too short to read decimals)`,
     [BIN_FARM_ERROR__INVALID_POOL]: `Invalid pool`,
     [BIN_FARM_ERROR__INVALID_POSITION]: `Invalid Meteora position`,
     [BIN_FARM_ERROR__INVALID_PROGRAM]: `Invalid Meteora program ID`,

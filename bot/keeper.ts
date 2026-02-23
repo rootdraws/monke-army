@@ -2,7 +2,7 @@
  * keeper.ts
  *
  * Saturday sequencer for monke.army.
- * 6-step weekly sequence — no phases, no state machine. 100% to monke holders.
+ * 6-step weekly sequence — no phases, no state machine. 50/50 split (monke holders / bot operations).
  *
  * Saturday sequence:
  *   0. claim_pool_fees   — DAMM v2 pool trading fees → rover_authority
@@ -138,7 +138,7 @@ export class MonkeKeeper {
 
   /**
    * Main entry point. Called by the orchestrator on each keeper tick.
-   * 100% to monke holders — no splitter, no dev split.
+   * 50/50 split — half to monke holders, half to bot (Config.bot).
    *
    * On Saturday (or whenever fees have accumulated):
    *   0. claim_pool_fees   — DAMM v2 → rover_authority
@@ -291,7 +291,7 @@ export class MonkeKeeper {
   // ─── CRANK: SWEEP ROVER (SOL) ───
 
   /**
-   * Sweep SOL from rover_authority to dist_pool (revenue_dest). 100% to monke holders.
+   * Sweep SOL from rover_authority — 50% to dist_pool (monke holders), 50% to bot (operations).
    */
   private async crankSweepRover(): Promise<void> {
     try {
@@ -307,6 +307,7 @@ export class MonkeKeeper {
             config: coreConfigPDA(this.coreProgramId)[0],
             roverAuthority,
             revenueDest,
+            botDest: this.botKeypair.publicKey,
           })
           .preInstructions(this.priorityIxs)
           .signers([this.botKeypair])
@@ -314,7 +315,7 @@ export class MonkeKeeper {
         'sweep_rover'
       );
 
-      logger.info('  [keeper] ✓ sweep_rover — SOL to dist_pool');
+      logger.info('  [keeper] ✓ sweep_rover — 50% to dist_pool, 50% to bot');
     } catch (e: any) {
       const isNothingToSweep = e.error?.errorCode?.code === 'NothingToSweep';
       if (isNothingToSweep) {
@@ -530,7 +531,12 @@ export class MonkeKeeper {
                 { pubkey: meteora.eventAuthority, isWritable: false, isSigner: false },
                 { pubkey: meteora.dlmmProgram, isWritable: false, isSigner: false },
               ])
-              .preInstructions([...this.priorityIxs, createVaultAtaX, createVaultAtaY])
+              .preInstructions([
+                ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
+                this.priorityIxs[1], // setComputeUnitPrice from cached priority IXs
+                createVaultAtaX,
+                createVaultAtaY,
+              ])
               .signers([this.botKeypair, meteoraPosition])
               .rpc(),
             `open_fee_rover ${mintStr.slice(0, 8)}`
@@ -595,7 +601,7 @@ export class MonkeKeeper {
 
   /**
    * Close rover positions where all bins are empty (fully converted + harvested).
-   * Rent refund goes to rover_authority → swept to dist_pool → 100% to monke holders.
+   * Rent refund goes to rover_authority → swept via sweep_rover (50/50 split).
    */
   private async crankCloseExhaustedRovers(): Promise<void> {
     try {

@@ -47,6 +47,7 @@ export type SweepRoverInstruction<
   TAccountConfig extends string | AccountMeta<string> = string,
   TAccountRoverAuthority extends string | AccountMeta<string> = string,
   TAccountRevenueDest extends string | AccountMeta<string> = string,
+  TAccountBotDest extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -65,6 +66,9 @@ export type SweepRoverInstruction<
       TAccountRevenueDest extends string
         ? WritableAccount<TAccountRevenueDest>
         : TAccountRevenueDest,
+      TAccountBotDest extends string
+        ? WritableAccount<TAccountBotDest>
+        : TAccountBotDest,
       ...TRemainingAccounts,
     ]
   >;
@@ -101,13 +105,14 @@ export type SweepRoverAsyncInput<
   TAccountConfig extends string = string,
   TAccountRoverAuthority extends string = string,
   TAccountRevenueDest extends string = string,
+  TAccountBotDest extends string = string,
 > = {
   /** Anyone can call sweep — permissionless */
   caller: TransactionSigner<TAccountCaller>;
   config?: Address<TAccountConfig>;
   roverAuthority?: Address<TAccountRoverAuthority>;
-  /** Reject executable accounts (prevents irretrievable SOL) */
   revenueDest: Address<TAccountRevenueDest>;
+  botDest: Address<TAccountBotDest>;
 };
 
 export async function getSweepRoverInstructionAsync<
@@ -115,13 +120,15 @@ export async function getSweepRoverInstructionAsync<
   TAccountConfig extends string,
   TAccountRoverAuthority extends string,
   TAccountRevenueDest extends string,
+  TAccountBotDest extends string,
   TProgramAddress extends Address = typeof BIN_FARM_PROGRAM_ADDRESS,
 >(
   input: SweepRoverAsyncInput<
     TAccountCaller,
     TAccountConfig,
     TAccountRoverAuthority,
-    TAccountRevenueDest
+    TAccountRevenueDest,
+    TAccountBotDest
   >,
   config?: { programAddress?: TProgramAddress }
 ): Promise<
@@ -130,7 +137,8 @@ export async function getSweepRoverInstructionAsync<
     TAccountCaller,
     TAccountConfig,
     TAccountRoverAuthority,
-    TAccountRevenueDest
+    TAccountRevenueDest,
+    TAccountBotDest
   >
 > {
   // Program address.
@@ -142,6 +150,7 @@ export async function getSweepRoverInstructionAsync<
     config: { value: input.config ?? null, isWritable: true },
     roverAuthority: { value: input.roverAuthority ?? null, isWritable: true },
     revenueDest: { value: input.revenueDest ?? null, isWritable: true },
+    botDest: { value: input.botDest ?? null, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -178,6 +187,7 @@ export async function getSweepRoverInstructionAsync<
       getAccountMeta(accounts.config),
       getAccountMeta(accounts.roverAuthority),
       getAccountMeta(accounts.revenueDest),
+      getAccountMeta(accounts.botDest),
     ],
     data: getSweepRoverInstructionDataEncoder().encode({}),
     programAddress,
@@ -186,7 +196,8 @@ export async function getSweepRoverInstructionAsync<
     TAccountCaller,
     TAccountConfig,
     TAccountRoverAuthority,
-    TAccountRevenueDest
+    TAccountRevenueDest,
+    TAccountBotDest
   >);
 }
 
@@ -195,13 +206,14 @@ export type SweepRoverInput<
   TAccountConfig extends string = string,
   TAccountRoverAuthority extends string = string,
   TAccountRevenueDest extends string = string,
+  TAccountBotDest extends string = string,
 > = {
   /** Anyone can call sweep — permissionless */
   caller: TransactionSigner<TAccountCaller>;
   config: Address<TAccountConfig>;
   roverAuthority: Address<TAccountRoverAuthority>;
-  /** Reject executable accounts (prevents irretrievable SOL) */
   revenueDest: Address<TAccountRevenueDest>;
+  botDest: Address<TAccountBotDest>;
 };
 
 export function getSweepRoverInstruction<
@@ -209,13 +221,15 @@ export function getSweepRoverInstruction<
   TAccountConfig extends string,
   TAccountRoverAuthority extends string,
   TAccountRevenueDest extends string,
+  TAccountBotDest extends string,
   TProgramAddress extends Address = typeof BIN_FARM_PROGRAM_ADDRESS,
 >(
   input: SweepRoverInput<
     TAccountCaller,
     TAccountConfig,
     TAccountRoverAuthority,
-    TAccountRevenueDest
+    TAccountRevenueDest,
+    TAccountBotDest
   >,
   config?: { programAddress?: TProgramAddress }
 ): SweepRoverInstruction<
@@ -223,7 +237,8 @@ export function getSweepRoverInstruction<
   TAccountCaller,
   TAccountConfig,
   TAccountRoverAuthority,
-  TAccountRevenueDest
+  TAccountRevenueDest,
+  TAccountBotDest
 > {
   // Program address.
   const programAddress = config?.programAddress ?? BIN_FARM_PROGRAM_ADDRESS;
@@ -234,6 +249,7 @@ export function getSweepRoverInstruction<
     config: { value: input.config ?? null, isWritable: true },
     roverAuthority: { value: input.roverAuthority ?? null, isWritable: true },
     revenueDest: { value: input.revenueDest ?? null, isWritable: true },
+    botDest: { value: input.botDest ?? null, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -247,6 +263,7 @@ export function getSweepRoverInstruction<
       getAccountMeta(accounts.config),
       getAccountMeta(accounts.roverAuthority),
       getAccountMeta(accounts.revenueDest),
+      getAccountMeta(accounts.botDest),
     ],
     data: getSweepRoverInstructionDataEncoder().encode({}),
     programAddress,
@@ -255,7 +272,8 @@ export function getSweepRoverInstruction<
     TAccountCaller,
     TAccountConfig,
     TAccountRoverAuthority,
-    TAccountRevenueDest
+    TAccountRevenueDest,
+    TAccountBotDest
   >);
 }
 
@@ -269,8 +287,8 @@ export type ParsedSweepRoverInstruction<
     caller: TAccountMetas[0];
     config: TAccountMetas[1];
     roverAuthority: TAccountMetas[2];
-    /** Reject executable accounts (prevents irretrievable SOL) */
     revenueDest: TAccountMetas[3];
+    botDest: TAccountMetas[4];
   };
   data: SweepRoverInstructionData;
 };
@@ -283,7 +301,7 @@ export function parseSweepRoverInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>
 ): ParsedSweepRoverInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 4) {
+  if (instruction.accounts.length < 5) {
     // TODO: Coded error.
     throw new Error('Not enough accounts');
   }
@@ -300,6 +318,7 @@ export function parseSweepRoverInstruction<
       config: getNextAccount(),
       roverAuthority: getNextAccount(),
       revenueDest: getNextAccount(),
+      botDest: getNextAccount(),
     },
     data: getSweepRoverInstructionDataDecoder().decode(instruction.data),
   };

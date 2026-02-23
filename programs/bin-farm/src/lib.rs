@@ -7,15 +7,14 @@
 // SECURITY FIXES applied:
 // - Vault PDA is per-position (not per-pool) — prevents cross-position drainage
 // - All token accounts validated for correct owner
-// - All fees route to rover_authority ATAs (100% to monke holders via dist_pool)
+// - All fees route to rover_authority ATAs (sweep_rover splits 50/50: monke holders + bot)
 // - Meteora accounts explicit in contexts (not remaining_accounts)
 // - claim_fees fully wired (was a stub)
 // - All 4 CPI TODOs replaced with verified Meteora CPI calls
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
-use anchor_spl::token::{Transfer, transfer};
-use anchor_spl::token_interface::TokenAccount as ITokenAccount;
+use anchor_spl::token_interface::{TokenAccount as ITokenAccount, TransferChecked, transfer_checked};
 
 mod meteora_dlmm_cpi;
 use meteora_dlmm_cpi::*;
@@ -274,6 +273,9 @@ pub mod bin_farm {
         require!(!bin_ids.is_empty(), CoreError::NoBinsProvided);
         require!(bin_ids.len() <= 70, CoreError::TooManyBins);
 
+        let x_decimals = read_mint_decimals(&ctx.accounts.token_x_mint)?;
+        let y_decimals = read_mint_decimals(&ctx.accounts.token_y_mint)?;
+
         let position_key = ctx.accounts.position.key();
         let owner_key = ctx.accounts.owner.key();
         let side = ctx.accounts.position.side;
@@ -438,99 +440,111 @@ pub mod bin_farm {
             let keeper_ata = keeper_ata_info;
             if x_tip > 0 {
                 memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-                transfer(
+                transfer_checked(
                     CpiContext::new_with_signer(
                         ctx.accounts.token_x_program.to_account_info(),
-                        Transfer {
+                        TransferChecked {
                             from: ctx.accounts.vault_token_x.to_account_info(),
+                            mint: ctx.accounts.token_x_mint.to_account_info(),
                             to: keeper_ata.to_account_info(),
                             authority: ctx.accounts.vault.to_account_info(),
                         },
                         signer,
                     ),
                     x_tip,
+                    x_decimals,
                 )?;
             }
             if y_tip > 0 {
                 memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-                transfer(
+                transfer_checked(
                     CpiContext::new_with_signer(
                         ctx.accounts.token_y_program.to_account_info(),
-                        Transfer {
+                        TransferChecked {
                             from: ctx.accounts.vault_token_y.to_account_info(),
+                            mint: ctx.accounts.token_y_mint.to_account_info(),
                             to: keeper_ata.to_account_info(),
                             authority: ctx.accounts.vault.to_account_info(),
                         },
                         signer,
                     ),
                     y_tip,
+                    y_decimals,
                 )?;
             }
         }
 
-        // Fee routing: all fees → rover_authority ATAs (100% to monke holders via sweep_rover → dist_pool)
+        // Fee routing: all fees → rover_authority ATAs (sweep_rover splits 50/50: monke holders + bot)
         //   TOKEN fees (Buy side) → rover_fee_token_x for DLMM recycling
         //   SOL fees (Sell side)  → rover_fee_token_y (WSOL, unwrapped later via close_rover_token_account)
         if x_to_protocol > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(
+            transfer_checked(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_x_program.to_account_info(),
-                    Transfer {
+                    TransferChecked {
                         from: ctx.accounts.vault_token_x.to_account_info(),
+                        mint: ctx.accounts.token_x_mint.to_account_info(),
                         to: ctx.accounts.rover_fee_token_x.to_account_info(),
                         authority: ctx.accounts.vault.to_account_info(),
                     },
                     signer,
                 ),
                 x_to_protocol,
+                x_decimals,
             )?;
         }
         if y_to_protocol > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(
+            transfer_checked(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_y_program.to_account_info(),
-                    Transfer {
+                    TransferChecked {
                         from: ctx.accounts.vault_token_y.to_account_info(),
+                        mint: ctx.accounts.token_y_mint.to_account_info(),
                         to: ctx.accounts.rover_fee_token_y.to_account_info(),
                         authority: ctx.accounts.vault.to_account_info(),
                     },
                     signer,
                 ),
                 y_to_protocol,
+                y_decimals,
             )?;
         }
 
         // Remainder -> owner
         if x_to_owner > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(
+            transfer_checked(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_x_program.to_account_info(),
-                    Transfer {
+                    TransferChecked {
                         from: ctx.accounts.vault_token_x.to_account_info(),
+                        mint: ctx.accounts.token_x_mint.to_account_info(),
                         to: ctx.accounts.owner_token_x.to_account_info(),
                         authority: ctx.accounts.vault.to_account_info(),
                     },
                     signer,
                 ),
                 x_to_owner,
+                x_decimals,
             )?;
         }
         if y_to_owner > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(
+            transfer_checked(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_y_program.to_account_info(),
-                    Transfer {
+                    TransferChecked {
                         from: ctx.accounts.vault_token_y.to_account_info(),
+                        mint: ctx.accounts.token_y_mint.to_account_info(),
                         to: ctx.accounts.owner_token_y.to_account_info(),
                         authority: ctx.accounts.vault.to_account_info(),
                     },
                     signer,
                 ),
                 y_to_owner,
+                y_decimals,
             )?;
         }
 
@@ -692,6 +706,8 @@ pub mod bin_farm {
             &ctx.accounts.owner,
             &ctx.accounts.token_x_program.to_account_info(),
             &ctx.accounts.token_y_program.to_account_info(),
+            &ctx.accounts.token_x_mint.to_account_info(),
+            &ctx.accounts.token_y_mint.to_account_info(),
             &ctx.accounts.memo_program,
             signer,
         )?;
@@ -816,6 +832,8 @@ pub mod bin_farm {
             &ctx.accounts.user.to_account_info(),
             &ctx.accounts.token_x_program.to_account_info(),
             &ctx.accounts.token_y_program.to_account_info(),
+            &ctx.accounts.token_x_mint.to_account_info(),
+            &ctx.accounts.token_y_mint.to_account_info(),
             &ctx.accounts.memo_program,
             signer,
         )?;
@@ -888,31 +906,36 @@ pub mod bin_farm {
         ctx.accounts.vault_token_x.reload()?;
         ctx.accounts.vault_token_y.reload()?;
 
+        let x_decimals = read_mint_decimals(&ctx.accounts.token_x_mint)?;
+        let y_decimals = read_mint_decimals(&ctx.accounts.token_y_mint)?;
+
         // Capture amounts BEFORE transfer for event (Anchor caches deserialized data)
         let x_claimed = ctx.accounts.vault_token_x.amount;
         let y_claimed = ctx.accounts.vault_token_y.amount;
 
         if ctx.accounts.vault_token_x.amount > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(CpiContext::new_with_signer(
+            transfer_checked(CpiContext::new_with_signer(
                 ctx.accounts.token_x_program.to_account_info(),
-                Transfer {
+                TransferChecked {
                     from: ctx.accounts.vault_token_x.to_account_info(),
+                    mint: ctx.accounts.token_x_mint.to_account_info(),
                     to: ctx.accounts.user_token_x.to_account_info(),
                     authority: ctx.accounts.vault.to_account_info(),
                 }, signer,
-            ), ctx.accounts.vault_token_x.amount)?;
+            ), ctx.accounts.vault_token_x.amount, x_decimals)?;
         }
         if ctx.accounts.vault_token_y.amount > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(CpiContext::new_with_signer(
+            transfer_checked(CpiContext::new_with_signer(
                 ctx.accounts.token_y_program.to_account_info(),
-                Transfer {
+                TransferChecked {
                     from: ctx.accounts.vault_token_y.to_account_info(),
+                    mint: ctx.accounts.token_y_mint.to_account_info(),
                     to: ctx.accounts.user_token_y.to_account_info(),
                     authority: ctx.accounts.vault.to_account_info(),
                 }, signer,
-            ), ctx.accounts.vault_token_y.amount)?;
+            ), ctx.accounts.vault_token_y.amount, y_decimals)?;
         }
 
         // Emit event using pre-transfer captured amounts (stale cache fix)
@@ -1101,30 +1124,35 @@ pub mod bin_farm {
         ];
         let signer = &[vault_seeds];
 
+        let x_decimals = read_mint_decimals(&ctx.accounts.token_x_mint)?;
+        let y_decimals = read_mint_decimals(&ctx.accounts.token_y_mint)?;
+
         let x_amount = ctx.accounts.vault_token_x.amount;
         if x_amount > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(CpiContext::new_with_signer(
+            transfer_checked(CpiContext::new_with_signer(
                 ctx.accounts.token_x_program.to_account_info(),
-                Transfer {
+                TransferChecked {
                     from: ctx.accounts.vault_token_x.to_account_info(),
+                    mint: ctx.accounts.token_x_mint.to_account_info(),
                     to: ctx.accounts.owner_token_x.to_account_info(),
                     authority: ctx.accounts.vault.to_account_info(),
                 }, signer,
-            ), x_amount)?;
+            ), x_amount, x_decimals)?;
         }
 
         let y_amount = ctx.accounts.vault_token_y.amount;
         if y_amount > 0 {
             memo_cpi(&ctx.accounts.memo_program, &ctx.accounts.vault.to_account_info(), signer)?;
-            transfer(CpiContext::new_with_signer(
+            transfer_checked(CpiContext::new_with_signer(
                 ctx.accounts.token_y_program.to_account_info(),
-                Transfer {
+                TransferChecked {
                     from: ctx.accounts.vault_token_y.to_account_info(),
+                    mint: ctx.accounts.token_y_mint.to_account_info(),
                     to: ctx.accounts.owner_token_y.to_account_info(),
                     authority: ctx.accounts.vault.to_account_info(),
                 }, signer,
-            ), y_amount)?;
+            ), y_amount, y_decimals)?;
         }
 
         // Clear pending state
@@ -1395,10 +1423,9 @@ pub mod bin_farm {
         Ok(())
     }
 
-    /// Sweep SOL from rover_authority to dist_pool. Permissionless — anyone can call.
-    /// This is how rover harvest proceeds reach monke holders via the accumulator.
+    /// Sweep SOL from rover_authority — 50% to dist_pool (monke holders), 50% to bot (operations).
+    /// Hardcoded split. Permissionless — anyone can call.
     pub fn sweep_rover(ctx: Context<SweepRover>) -> Result<()> {
-        // Track sweep heartbeat
         let is_authorized_bot = ctx.accounts.caller.key() == ctx.accounts.config.bot;
         if is_authorized_bot {
             ctx.accounts.config.last_bot_sweep_slot = Clock::get()?.slot;
@@ -1410,19 +1437,23 @@ pub mod bin_farm {
 
         require!(sweepable > 0, CoreError::NothingToSweep);
 
-        // Direct lamport manipulation instead of system_instruction::transfer.
-        // rover_authority is program-owned (Anchor account), not system-owned.
-        // system_instruction::transfer requires system-owned source — would fail at runtime.
+        let monke_share = sweepable / 2;
+        let operator_share = sweepable - monke_share;
+
         **ctx.accounts.rover_authority.to_account_info().try_borrow_mut_lamports()? -= sweepable;
-        **ctx.accounts.revenue_dest.try_borrow_mut_lamports()? += sweepable;
+        **ctx.accounts.revenue_dest.try_borrow_mut_lamports()? += monke_share;
+        **ctx.accounts.bot_dest.try_borrow_mut_lamports()? += operator_share;
 
         emit!(RoverSweptEvent {
             amount: sweepable,
+            monke_share,
+            operator_share,
             dist_pool: ctx.accounts.revenue_dest.key(),
+            bot: ctx.accounts.bot_dest.key(),
             timestamp: Clock::get()?.unix_timestamp,
         });
 
-        msg!("Swept {} lamports from rover to dist_pool", sweepable);
+        msg!("Swept {} lamports — {} to dist_pool, {} to bot", sweepable, monke_share, operator_share);
         Ok(())
     }
 
@@ -1787,6 +1818,12 @@ fn memo_cpi<'info>(
 
 /// Shared fee calc + transfer logic for close_position and user_close.
 /// Uses separate token_x_program/token_y_program for Token-2022 support.
+fn read_mint_decimals(mint_info: &AccountInfo) -> Result<u8> {
+    let data = mint_info.try_borrow_data()?;
+    require!(data.len() >= 45, CoreError::InvalidMintData);
+    Ok(data[44])
+}
+
 /// Zeros vault lamports entirely (garbage-collected at end of tx).
 /// Returns (x_fee, y_fee, x_to_recipient, y_to_recipient) for event emission.
 ///
@@ -1808,6 +1845,8 @@ fn execute_close_transfers<'info>(
     _recipient: &AccountInfo<'info>,
     token_x_program: &AccountInfo<'info>,
     token_y_program: &AccountInfo<'info>,
+    token_x_mint: &AccountInfo<'info>,
+    token_y_mint: &AccountInfo<'info>,
     memo_program: &AccountInfo<'info>,
     signer: &[&[&[u8]]],
 ) -> Result<(u64, u64, u64, u64)> {
@@ -1816,6 +1855,9 @@ fn execute_close_transfers<'info>(
     let vault_x_balance = vault_token_x.amount;
     let vault_y_balance = vault_token_y.amount;
     let fee = fee_bps as u128;
+
+    let x_decimals = read_mint_decimals(token_x_mint)?;
+    let y_decimals = read_mint_decimals(token_y_mint)?;
 
     let (x_fee, y_fee) = match side {
         Side::Buy => {
@@ -1835,53 +1877,57 @@ fn execute_close_transfers<'info>(
     let x_to_recipient = vault_x_balance.checked_sub(x_fee).ok_or(CoreError::Overflow)?;
     let y_to_recipient = vault_y_balance.checked_sub(y_fee).ok_or(CoreError::Overflow)?;
 
-    // Fee routing: all fees → rover_authority ATAs (100% to monke holders)
+    // Fee routing: all fees → rover_authority ATAs (sweep_rover splits 50/50: monke holders + bot)
     //   TOKEN fees (Buy side, x_fee) → rover_fee_token_x for DLMM recycling
     //   SOL fees (Sell side, y_fee)  → rover_fee_token_y (WSOL, unwrapped later)
     // B2 FIX: Prepend memo before each transfer (supports Memo Transfer extension)
     if x_fee > 0 {
         memo_cpi(memo_program, vault, signer)?;
-        transfer(CpiContext::new_with_signer(
+        transfer_checked(CpiContext::new_with_signer(
             token_x_program.to_account_info(),
-            Transfer {
+            TransferChecked {
                 from: vault_token_x.to_account_info(),
+                mint: token_x_mint.to_account_info(),
                 to: rover_fee_token_x.to_account_info(),
                 authority: vault.to_account_info(),
             }, signer,
-        ), x_fee)?;
+        ), x_fee, x_decimals)?;
     }
     if y_fee > 0 {
         memo_cpi(memo_program, vault, signer)?;
-        transfer(CpiContext::new_with_signer(
+        transfer_checked(CpiContext::new_with_signer(
             token_y_program.to_account_info(),
-            Transfer {
+            TransferChecked {
                 from: vault_token_y.to_account_info(),
+                mint: token_y_mint.to_account_info(),
                 to: rover_fee_token_y.to_account_info(),
                 authority: vault.to_account_info(),
             }, signer,
-        ), y_fee)?;
+        ), y_fee, y_decimals)?;
     }
     if x_to_recipient > 0 {
         memo_cpi(memo_program, vault, signer)?;
-        transfer(CpiContext::new_with_signer(
+        transfer_checked(CpiContext::new_with_signer(
             token_x_program.to_account_info(),
-            Transfer {
+            TransferChecked {
                 from: vault_token_x.to_account_info(),
+                mint: token_x_mint.to_account_info(),
                 to: recipient_token_x.to_account_info(),
                 authority: vault.to_account_info(),
             }, signer,
-        ), x_to_recipient)?;
+        ), x_to_recipient, x_decimals)?;
     }
     if y_to_recipient > 0 {
         memo_cpi(memo_program, vault, signer)?;
-        transfer(CpiContext::new_with_signer(
+        transfer_checked(CpiContext::new_with_signer(
             token_y_program.to_account_info(),
-            Transfer {
+            TransferChecked {
                 from: vault_token_y.to_account_info(),
+                mint: token_y_mint.to_account_info(),
                 to: recipient_token_y.to_account_info(),
                 authority: vault.to_account_info(),
             }, signer,
-        ), y_to_recipient)?;
+        ), y_to_recipient, y_decimals)?;
     }
 
     // Vault lamports handled by Anchor `close` constraint on the context
@@ -2048,10 +2094,10 @@ impl Vault {
 }
 
 /// Rover authority PDA — owns rover (bribe) positions.
-/// Harvest proceeds accumulate here. sweep_rover sends SOL to revenue_dest (dist_pool — 100% to monke holders).
+/// Harvest proceeds accumulate here. sweep_rover splits SOL 50/50: half to revenue_dest (dist_pool), half to Config.bot.
 #[account]
 pub struct RoverAuthority {
-    pub revenue_dest: Pubkey,              // Where swept SOL goes (dist_pool PDA — 100% to monke holders)
+    pub revenue_dest: Pubkey,              // Where monke share goes (dist_pool PDA — 50% of swept SOL)
     pub total_rover_positions: u64,        // Lifetime count
     pub bump: u8,
     pub pending_revenue_dest: Pubkey,      // Timelocked: proposed new revenue_dest
@@ -2259,7 +2305,7 @@ pub struct ClosePosition<'info> {
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
     pub owner_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
-    // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
+    // --- Fee routing: all fees → rover_authority ATAs (sweep_rover splits 50/50) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
     pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
@@ -2369,7 +2415,7 @@ pub struct BotHarvest<'info> {
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
     pub owner_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
-    // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
+    // --- Fee routing: all fees → rover_authority ATAs (sweep_rover splits 50/50) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
     pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
@@ -2471,7 +2517,7 @@ pub struct UserClose<'info> {
     #[account(mut, constraint = user_token_y.owner == user.key() @ CoreError::InvalidTokenOwner)]
     pub user_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
 
-    // --- Fee routing: all fees → rover_authority ATAs (100% to monke holders) ---
+    // --- Fee routing: all fees → rover_authority ATAs (sweep_rover splits 50/50) ---
     #[account(seeds = [b"rover_authority"], bump = rover_authority.bump)]
     pub rover_authority: Box<Account<'info, RoverAuthority>>,
 
@@ -2638,6 +2684,11 @@ pub struct ApplyEmergencyClose<'info> {
 
     #[account(mut, constraint = owner_token_y.owner == position.owner @ CoreError::InvalidTokenOwner)]
     pub owner_token_y: Box<InterfaceAccount<'info, ITokenAccount>>,
+
+    /// CHECK: Token X mint
+    pub token_x_mint: UncheckedAccount<'info>,
+    /// CHECK: Token Y mint
+    pub token_y_mint: UncheckedAccount<'info>,
 
     /// CHECK: Token X program
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2833,14 +2884,21 @@ pub struct SweepRover<'info> {
     )]
     pub rover_authority: Account<'info, RoverAuthority>,
 
-    /// CHECK: Revenue destination — dist_pool PDA (100% to monke holders)
-    /// Reject executable accounts (prevents irretrievable SOL)
+    /// CHECK: Revenue destination — dist_pool PDA (50% to monke holders)
     #[account(
         mut,
         constraint = revenue_dest.key() == rover_authority.revenue_dest @ CoreError::InvalidPool,
         constraint = !revenue_dest.executable @ CoreError::InvalidDistPool
     )]
     pub revenue_dest: AccountInfo<'info>,
+
+    /// CHECK: Operator destination — bot keypair from Config (50% to operations)
+    #[account(
+        mut,
+        constraint = bot_dest.key() == config.bot @ CoreError::InvalidBot,
+        constraint = !bot_dest.executable @ CoreError::InvalidBot
+    )]
+    pub bot_dest: AccountInfo<'info>,
 }
 
 /// Close a token account owned by rover_authority. Permissionless.
@@ -2989,7 +3047,10 @@ pub struct RoverOpenedEvent {
 #[event]
 pub struct RoverSweptEvent {
     pub amount: u64,
+    pub monke_share: u64,
+    pub operator_share: u64,
     pub dist_pool: Pubkey,
+    pub bot: Pubkey,
     pub timestamp: i64,
 }
 
@@ -3062,5 +3123,9 @@ pub enum CoreError {
     NoPendingEmergencyClose,
     #[msg("Emergency close timelock not expired (24 hours required)")]
     EmergencyCloseTimelockNotExpired,
+    #[msg("Invalid mint account data (too short to read decimals)")]
+    InvalidMintData,
+    #[msg("Invalid bot destination")]
+    InvalidBot,
 
 }
