@@ -8,13 +8,17 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:frontend": "node scripts/build-frontend.mjs",
-    "bot": "node bot/monitor.js",
-    "bot:dev": "node --watch bot/monitor.js"
+    "bot": "tsx bot/anchor-harvest-bot.ts",
+    "bot:dev": "tsx --watch bot/anchor-harvest-bot.ts"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.30.0",
+    "@codama/nodes-from-anchor": "^1.3.9",
+    "@codama/renderers": "^1.0.34",
+    "@codama/visitors-core": "^1.5.1",
+    "@coral-xyz/anchor": "^0.30.1",
     "@meteora-ag/alpha-vault": "^1.1.15",
     "@meteora-ag/dlmm": "^1.3.0",
+    "@solana/kit": "^6.1.0",
     "@solana/spl-token": "^0.4.0",
     "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/wallet-adapter-phantom": "^0.9.24",
@@ -25,12 +29,15 @@
     "@types/pino": "^7.0.4",
     "bn.js": "^5.2.1",
     "dotenv": "^17.3.1",
-    "pino": "^10.3.0"
+    "pino": "^10.3.0",
+    "ws": "^7.5.10"
   },
   "devDependencies": {
     "@types/node": "^25.2.2",
+    "@types/ws": "^7.4.7",
     "esbuild": "^0.24.0",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^5.0.0"
   },

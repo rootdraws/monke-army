@@ -2,149 +2,85 @@
 
 ---
 
-**Phase 1 (pool + Alpha Vault) and Phase 2 (programs) completed Feb 16, 2026.** All mainnet addresses in `CLAUDE.md`.
+## Tier 1 — Security
+
+- [ ] **Rotate Helius API key** — Go to Helius dashboard, generate new key. Free-tier key for `public/config.json`, Pro key in `bot/.env` only. Do before repo goes public.
 
 ---
 
-## Phase 3 — Run bot locally
+## Tier 2 — Deploy + E2E testing
 
-- [ ] Configure `.env`: `RPC_URL`, `GRPC_ENDPOINT`, `BOT_KEYPAIR_PATH`, program IDs, `BANANAS_MINT`, DAMM v2 vars
-- [ ] `npx ts-node bot/anchor-harvest-bot.ts` — verify it starts, connects gRPC, loads positions
-- [ ] Validate LaserStream subscription — bin detection, active_id parsing, position tracking
-- [ ] Validate relay server — `http://localhost:8080/api/stats`, WebSocket `/ws` events
-- [ ] Validate Saturday keeper — claim pool fees → unwrap WSOL → sweep → fee rovers → deposit → cleanup
+### Deploy bot to server
 
-**Unlocks:** Relay serves live data to frontend. Bot cranks permissionless instructions. Full data backbone running.
+PM2 config ready at `bot/ecosystem.config.cjs`. Steps:
 
----
+1. Create DigitalOcean droplet (Ubuntu 22.04, 2GB RAM, $12/mo)
+2. `ssh root@<ip>`, install Node 20, clone repo, `npm install`
+3. `cp bot/anchor-harvest-bot.env.example bot/.env` — fill RPC_URL, GRPC_ENDPOINT, BOT_KEYPAIR_PATH
+4. Copy bot keypair JSON to server
+5. `npm install -g pm2`
+6. `pm2 start bot/ecosystem.config.cjs`
+7. `pm2 save && pm2 startup`
+8. Verify: `curl http://localhost:8080/api/stats`
+9. Set up nginx reverse proxy with SSL for `wss://bot.monke.army` (or open port 8080)
 
-## Phase 4 — Frontend (all pages, live transactions)
+### Deploy frontend
 
-All 5 pages have HTML + styles + event wiring. See `frontend-dev.md` for page specs and design constraints.
+Vercel config ready at `vercel.json`. Steps:
 
-### Trade page
-- [x] Replace demo-mode position creation with live `open_position` tx *(Feb 21 — V1 for SPL pools, V2 for Token-2022 pools. First mainnet position opened.)*
-- [x] Wire positions list to on-chain `getProgramAccounts` *(Feb 21 — `refreshPositionsList()` with corrected byte offsets)*
-- [x] Close position: live `user_close` tx wired *(Feb 21 — wired but untested on mainnet)*
-- [ ] Claim LP fees button per position
-- [ ] Pool selector UX — featured pools from relay, recent pools, paste address
-- [ ] Bin range visualization improvements
+1. `npm i -g vercel`
+2. `vercel` — link project, confirm build command (`npm run build:frontend`), output dir (`dist`)
+3. DNS: point `monke.army` to Vercel
+4. Update `dist/config.json` with production `BOT_RELAY_URL` (`wss://bot.monke.army` or droplet IP)
+5. Verify all 6 pages load
 
-### Rank page — Monke sub-page
-- [ ] Fetch user's SMB Gen2/Gen3 NFTs via Helius DAS `getAssetsByOwner`
-- [ ] NFT grid: image + name + collection badge (Gen2/Gen3)
-- [ ] Per-NFT: read MonkeBurn PDA → show weight + claimable SOL
-- [ ] Feed button: live `feed_monke` tx
-- [ ] Claim button: live `claim` tx
-- [ ] "Claim All" button: batch claim across all fed monkes
-- [ ] Jupiter Terminal embed for "Buy $BANANAS" (with live BANANAS_MINT)
-- [ ] "No NFTs found" state — link to SMB marketplace
+### E2E test runbook
 
-### Rank page — Roster sub-page
-- [ ] Leaderboard: fetch all MonkeBurn PDAs, sort by weight, render table
-- [ ] MonkeBurn lookup: paste NFT mint → read PDA → weight + unclaimed estimate
-- [ ] Global stats: read MonkeState for total_burned, total_share_weight, total_sol_distributed
+Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
-### Ops page
-- [ ] Bounty board from relay REST (`GET /api/pending-harvests`)
-- [ ] Per-harvest "Harvest" button: live `harvest_bins` tx
-- [ ] "Harvest All" button: batch harvests
-- [ ] Crank buttons: live `sweep_rover`, `deposit_sol`, `compost_monke` txs
-- [ ] Stats grid from relay REST (`GET /api/stats`)
-
-### Recon page
-- [ ] Rover leaderboard from relay REST (`GET /api/rovers`)
-- [ ] Top-5 analytics cards from `GET /api/rovers/top5`
-- [ ] Bribe deposit: live `open_rover_position` tx
-- [ ] Click-to-trade: pool row → loads into Trade page
-
-### Enlist page
-- [ ] Verify end-to-end with live Alpha Vault (countdown → deposit → claim)
-
-### Cross-cutting
-- [ ] Aesthetics pass — visual consistency across all 5 pages
-- [ ] Loading states — spinners/skeletons while fetching
-- [ ] Error states — graceful handling when relay offline or RPC fails
-- [ ] Mobile responsiveness check
+- [ ] **Open position** — Trade page, SOL/USDC (default pool). Buy side, 5%-35% range, 0.01 SOL. Approve. Verify position on Positions page.
+- [ ] **Wait for harvest** — Watch Ops activity feed. Bot harvests when price crosses bins.
+- [ ] **Test user_close** — Positions page, click "close". Approve. Verify SOL returns minus 0.3% fee.
+- [ ] **Test claim_fees** — Open position, wait for LP fees to accrue, click "fees" on Positions page.
+- [ ] **Test sweep** — Ops page, check rover_authority balance. If > 0, click "sweep". Verify SOL moves to dist_pool.
+- [ ] **Test deposit** — Ops page, check dist_pool balance. If > 0, click "deposit". Verify SOL moves to program_vault.
+- [ ] **Test feed_monke** — Rank page, select SMB NFT, click "Burn 1M $BANANAS to your Monke." Verify weight increments.
+- [ ] **Test claim** — After deposit_sol, click "claim" on fed monke. Verify SOL arrives.
+- [ ] **Test permissionless fallback** — Stop bot for 60s. Go to Ops bounty board. Click "harvest" on a pending position. Verify keeper tip.
+- [ ] **Validate Saturday keeper** — Wait for Saturday or manually trigger. Verify 6-step sequence: claim_pool_fees -> unwrap WSOL -> sweep_rover -> fee rovers -> deposit_sol -> cleanup.
 
 ---
 
-## Phase 5 — Deploy bot to server
+## Tier 4 — Independent feature work (no program changes)
 
-- [ ] DigitalOcean 1-2GB droplet ($6-12/mo)
-- [ ] Configure env vars, PM2/systemd for auto-restart
-- [ ] Set `BOT_RELAY_URL` in prod `config.json` to `wss://bot.monke.army` (or droplet IP)
-- [ ] Verify relay accessible from public internet
-- [ ] Monitor: health endpoint, reconnect behavior, cache hit rates
-
----
-
-## Phase 6 — End-to-end testing
-
-- [x] Open position on mainnet *(Feb 21 — 0.1 SOL buy on Speedrun/SOL Token-2022 pool)*
-- [ ] Full loop: open → bot harvests → fee to rover → sweep to dist_pool → feed monke → claim SOL
-- [ ] Test V1 `open_position` on SPL-only pool *(untested post-Box<> changes)*
-- [ ] Test `user_close` on mainnet
-- [ ] Verify all 5 frontend pages with live data
-- [ ] Test permissionless fallback — stop bot for 60s, harvest as keeper, verify tip
-- [ ] Test emergency close flow (propose → wait 24hr → apply)
-- [ ] Test edge cases: dust positions, empty rover sweep
+- [ ] **Recon page** — Rover TVL leaderboard, top-5 analytics, bribe deposit, click-to-trade. Pure frontend, depends on relay data.
+- [ ] **Rover TVL computation** — Bot-side dollar-value computation for rover positions. Wire callback to relay.
+- [ ] **Load $BANANAS DLMM** — Create a BANANAS/SOL DLMM pool on Meteora, list as default pair option on Trade page. Operational task.
+- [ ] **compost_monke crank** — Requires an observation indexer to scan for burned NFTs (supply == 0) with active MonkeBurn PDAs. New infrastructure.
+- [ ] **Transfer hook support** — Resolve transfer hook extra accounts from mint extension data via DLMM SDK. Unlocks pools with transfer hook mints. Add when demand exists.
+- [ ] **Program split** — Move rover system to separate program. Constrained by rover_authority LP NFT ownership (CPI gateway required). Add if stack pressure or code separation justifies it.
 
 ---
 
-## Phase 7 — Go live
+## BD
 
-- [ ] Deploy frontend to Vercel (or equivalent)
-- [ ] DNS: monke.army → Vercel
-- [ ] Final config.json with production RPC, relay URL, all addresses
-- [ ] Remove demo mode banner
-- [ ] Remove Enlist page after Alpha Vault closes (pull `#page-enlist`, revert to 4-page nav)
-
----
-
-## Low Priority (post-launch)
-
-- [ ] **Rover TVL computation** — callback wired to relay, dollar-value computation stubbed. Implement DLMM bin value queries.
-- [ ] **Token-2022 transfer hook support** — documented limitation. Deferred post-launch.
-- [ ] **Remove Enlist page** — after Alpha Vault closes, pull `#page-enlist` from HTML, revert to 4-page nav.
+- [ ] **Submit Graveyard Hackathon** — Deadline Feb 28.
+- [ ] **Attend Monke Weekly Townhall** — Feb 27, 17:00 UTC.
+- [ ] **Apply MonkeFoundry Cohort 2**
+- [ ] **Apply Meteora Rising**
+- [ ] **Pitch Helius for LaserStream sponsorship**
+- [ ] **Share with LP Army**
 
 ---
 
-## Technical Debt — Feb 21 session
+## Ideas
 
-See `refactor.md` for full details.
-
-- [ ] **Program split** — core.rs is at 3440 lines and hitting BPF 4KB stack frame limits. Split rover system into a separate program.
-- [ ] **Reduce remaining_accounts** — `OpenPositionV2` has 6 accounts in `remaining_accounts` with no Anchor validation. Use `InterfaceAccount<Mint>` for mints, `LazyAccount` (Anchor 0.31) for deferred deserialization, or program split to free stack space.
-- [ ] **Unify V1/V2 open_position** — use `add_liquidity_by_strategy2` for all pools (SPL-only pools work fine with V2). Eliminates frontend V1/V2 branching.
-- [ ] **Smoke test V1 path** — `open_position` (SPL-only) untested on mainnet after `Box<>` changes.
-- [ ] **IDL regeneration** — IDL is stale after `OpenPositionV2` struct expansion + new CPI types. Regenerate for client codegen.
-- [ ] **Freeze program upgrades** — 8 deploys in one session. Transfer upgrade authority to multisig or hardware wallet once stable.
+- Aggregated order profiles across DLMM + DAMM v2 pools
+- NFT metadata for commonly traded pairs
+- Question Market Workflow (one token CA -> pool launch flow)
+- DAMM v2 Pool Liquidity profiles
+- Discord Bot for bin fill notifications
 
 ---
 
-## Funding / Distribution
-
-- [ ] **Submit Graveyard Hackathon** — deadline Feb 28. Target NFT bounty ($2.5K) and main prizes ($15K/$10K/$5K).
-- [ ] **Apply to MonkeFoundry Cohort 2** — when applications open. Build relationships in MonkeDAO Discord first.
-- [ ] **Pitch Helius for LaserStream sponsorship** — "100% of fees to monke holders. Zero dev cut. I need LaserStream to run it."
-- [ ] **Attend Monke Weekly Townhall** — Feb 27, 17:00 UTC, Discord. Be in the room.
-- [ ] **Monday Monke Spotlight pitch** — when ready to present.
-
----
-
-## Non-Development
-
-- [ ] **Document bot key rotation procedure** — Sequence: core first, then restart bot. Write before mainnet.
-- [ ] **Rover framing template** — One paragraph for token projects announcing rover deposits. Include in Recon page.
-- [ ] **Secure program upgrade authority** — Hardware wallet for upgrade authority keypair. Plan for freezing (immutable) once stable.
-- [ ] **Participate in Alpha Vault** — buy alongside everyone else. Same price, same terms.
-- [ ] **Demo Pitch to 5 SMBv2 Holders associated with LP Army**
-
----
-
-**IDL regeneration:** `cargo update -p proc-macro2 --precise 1.0.94` then `RUSTUP_TOOLCHAIN=nightly-2024-11-01 anchor idl build -p <program> -o target/idl/<program>.json`
-
-**Build:** `PATH="$HOME/.cargo/bin:$PATH" cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml` (Homebrew cargo doesn't support +toolchain)
-
-*Last updated: Feb 21, 2026. First mainnet position opened. V2 Token-2022 CPI added. See `refactor.md` for technical debt from this session.*
+*Last updated: Feb 22, 2026.*

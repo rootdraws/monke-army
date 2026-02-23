@@ -419,7 +419,6 @@ export class HarvestExecutor extends EventEmitter {
           roverAuthority,
           roverFeeTokenX,
           roverFeeTokenY,
-          tokenProgram:       TOKEN_PROGRAM_ID,
           tokenXProgram:      meteora.tokenXProgram,
           tokenYProgram:      meteora.tokenYProgram,
           memoProgram:        meteora.memoProgram,

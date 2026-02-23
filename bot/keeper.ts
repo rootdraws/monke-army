@@ -386,7 +386,7 @@ export class MonkeKeeper {
   // ─── CRANK: OPEN FEE ROVERS ───
 
   /**
-   * Open BidAskOneSide DLMM positions from accumulated token fees in rover_authority ATAs.
+   * Open BidAskImBalanced DLMM positions from accumulated token fees in rover_authority ATAs.
    * Skips mints in DIRECT_SWAP_MINTS (excluded from rover recycling).
    * Skips balances below MIN_FEE_ROVER_VALUE.
    */
@@ -486,11 +486,14 @@ export class MonkeKeeper {
             this.coreProgramId
           );
 
-          // Vault ATA for the token
-          const vaultTokenAccount = getAssociatedTokenAddressSync(mint, vaultPda, true, tokenProgramId);
-          // Create vault ATA instruction
-          const createVaultAta = createAssociatedTokenAccountIdempotentInstruction(
-            this.botKeypair.publicKey, vaultTokenAccount, vaultPda, mint, tokenProgramId,
+          // Vault ATAs for both token X and token Y
+          const vaultTokenX = getAssociatedTokenAddressSync(meteora.tokenXMint, vaultPda, true, meteora.tokenXProgram);
+          const vaultTokenY = getAssociatedTokenAddressSync(meteora.tokenYMint, vaultPda, true, meteora.tokenYProgram);
+          const createVaultAtaX = createAssociatedTokenAccountIdempotentInstruction(
+            this.botKeypair.publicKey, vaultTokenX, vaultPda, meteora.tokenXMint, meteora.tokenXProgram,
+          );
+          const createVaultAtaY = createAssociatedTokenAccountIdempotentInstruction(
+            this.botKeypair.publicKey, vaultTokenY, vaultPda, meteora.tokenYMint, meteora.tokenYProgram,
           );
 
           const amountBN = new BN(rawAmount.toString());
@@ -505,25 +508,29 @@ export class MonkeKeeper {
                 lbPair,
                 meteoraPosition:      meteoraPosition.publicKey,
                 binArrayBitmapExt:    meteora.binArrayBitmapExt,
-                reserve:              meteora.reserveX,
+                reserveX:             meteora.reserveX,
+                reserveY:             meteora.reserveY,
                 binArrayLower:        meteora.binArrayLower,
                 binArrayUpper:        meteora.binArrayUpper,
-                eventAuthority:       meteora.eventAuthority,
-                dlmmProgram:          meteora.dlmmProgram,
                 position:             PublicKey.findProgramAddressSync(
                   [Buffer.from('position'), meteoraPosition.publicKey.toBuffer()],
                   this.coreProgramId
                 )[0],
                 vault:                vaultPda,
                 roverTokenAccount:    account.pubkey,
-                vaultTokenAccount,
-                tokenMint:            mint,
-                tokenProgram:         tokenProgramId,
-                associatedTokenProgram: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
+                vaultTokenX,
+                vaultTokenY,
+                tokenXMint:           meteora.tokenXMint,
+                tokenYMint:           meteora.tokenYMint,
+                tokenXProgram:        meteora.tokenXProgram,
+                tokenYProgram:        meteora.tokenYProgram,
                 systemProgram:        new PublicKey('11111111111111111111111111111111'),
-                rent:                 new PublicKey('SysvarRent111111111111111111111111111111111'),
               })
-              .preInstructions([...this.priorityIxs, createVaultAta])
+              .remainingAccounts([
+                { pubkey: meteora.eventAuthority, isWritable: false, isSigner: false },
+                { pubkey: meteora.dlmmProgram, isWritable: false, isSigner: false },
+              ])
+              .preInstructions([...this.priorityIxs, createVaultAtaX, createVaultAtaY])
               .signers([this.botKeypair, meteoraPosition])
               .rpc(),
             `open_fee_rover ${mintStr.slice(0, 8)}`
@@ -686,7 +693,6 @@ export class MonkeKeeper {
                     roverFeeTokenY,
                     roverAuthority,
                     roverFeeTokenX,
-                    tokenProgram:       SPL_TOKEN_ID,
                     tokenXProgram:      meteora.tokenXProgram,
                     tokenYProgram:      meteora.tokenYProgram,
                     memoProgram:        SPL_MEMO_PROGRAM_ID,

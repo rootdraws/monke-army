@@ -97,7 +97,7 @@ Three revenue streams → one destination:
 1. Position fees (0.3% on converted output)
      SOL fees → rover_authority WSOL ATA → close_rover_token_account (unwrap)
         → sweep_rover → dist_pool → monke holders
-     TOKEN fees → rover_authority → sell-side DLMM (BidAskOneSide)
+     TOKEN fees → rover_authority → sell-side DLMM (BidAskImBalanced)
         → natural trading converts to SOL → sweep_rover → dist_pool → monke holders
 
 2. Rover bribe proceeds

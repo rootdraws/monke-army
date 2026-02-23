@@ -35,7 +35,7 @@ import { logger } from './logger';
 import { getDLMMCacheSize, getDLMM } from './meteora-accounts';
 import * as path from 'path';
 
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 // ═══ CONFIG ═══
 
@@ -230,10 +230,10 @@ class HarvestBot {
     }
 
     const coreIdl = loadIdl('bin_farm');
-    this.coreProgram = new Program(coreIdl, CORE_PROGRAM_ID, this.provider);
+    this.coreProgram = new Program(coreIdl, this.provider);
 
     const monkeIdl = loadIdl('monke_bananas');
-    this.monkeProgram = new Program(monkeIdl, MONKE_BANANAS_PROGRAM_ID, this.provider);
+    this.monkeProgram = new Program(monkeIdl, this.provider);
 
     // Verify bot authorization
     const [configPDA] = coreConfigPDA();
@@ -466,6 +466,6 @@ class HarvestBot {
 // ═══ ENTRY ═══
 
 new HarvestBot().run().catch(e => {
-  logger.error('FATAL:', e);
+  console.error('FATAL:', e);
   process.exit(1);
 });

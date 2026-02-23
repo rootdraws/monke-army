@@ -391,14 +391,14 @@
     /* ─── POSITIONS PAGE ─── all wallet positions */
 
     .pos-page-header {
-      display: grid; grid-template-columns: 1.5fr 0.7fr 1.2fr 0.8fr 0.8fr 0.7fr;
+      display: grid; grid-template-columns: 1.5fr 0.7fr 1.2fr 0.8fr 0.8fr 0.7fr auto auto;
       gap: 8px; padding: 8px 0;
       font-size: 8px; color: var(--faint);
       letter-spacing: 2px; text-transform: lowercase;
       border-bottom: 1px solid rgba(30, 45, 80, 0.4);
     }
     .pos-page-row {
-      display: grid; grid-template-columns: 1.5fr 0.7fr 1.2fr 0.8fr 0.8fr 0.7fr;
+      display: grid; grid-template-columns: 1.5fr 0.7fr 1.2fr 0.8fr 0.8fr 0.7fr auto auto;
       gap: 8px; padding: 10px 0;
       font-size: 10px; font-weight: 300;
       border-bottom: 1px solid rgba(30, 45, 80, 0.15);
@@ -514,29 +514,39 @@
       grid-template-columns: repeat(2, 1fr);
     }
 
-    .nft-grid {
-      display: grid; grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
+    .nft-carousel {
+      display: flex; align-items: center; gap: 4px;
     }
-    .nft-card {
-      aspect-ratio: 1; border: 1px solid var(--faint);
-      cursor: pointer; transition: border-color 0.2s;
-      overflow: hidden; position: relative;
+    .carousel-frame {
+      flex: 1; aspect-ratio: 1; overflow: hidden;
+      border: 1px solid var(--faint); position: relative;
       background: rgba(30, 45, 80, 0.15);
     }
-    .nft-card:hover { border-color: var(--dim); }
-    .nft-card.selected { border-color: var(--bananas); }
-    .nft-card img {
-      width: 100%; height: 100%; object-fit: cover;
-      display: block;
+    .carousel-frame img {
+      width: 100%; height: 100%; object-fit: cover; display: block;
     }
-    .nft-card .nft-gen-tag {
-      position: absolute; bottom: 2px; right: 2px;
-      font-size: 7px; letter-spacing: 1px;
-      padding: 1px 3px; background: rgba(15, 26, 58, 0.8);
+    .carousel-frame .nft-gen-tag {
+      position: absolute; bottom: 4px; right: 4px;
+      font-size: 8px; letter-spacing: 1px;
+      padding: 1px 4px; background: rgba(15, 26, 58, 0.85);
     }
-    .nft-card .nft-gen-tag.gen2 { color: var(--bananas); }
-    .nft-card .nft-gen-tag.gen3 { color: var(--dim); }
+    .carousel-frame .nft-gen-tag.gen2 { color: var(--bananas); }
+    .carousel-frame .nft-gen-tag.gen3 { color: var(--dim); }
+    .carousel-arrow {
+      background: none; border: none; color: var(--dim);
+      cursor: pointer; font-size: 14px; padding: 4px;
+      transition: color 0.2s;
+    }
+    .carousel-arrow:hover { color: var(--fg); }
+    .carousel-counter {
+      font-size: 8px; color: var(--dim); text-align: center;
+      letter-spacing: 1px; margin-top: 4px;
+    }
+    .nft-burn-info {
+      position: absolute; top: 4px; left: 4px;
+      font-size: 7px; letter-spacing: 0.5px; color: var(--fg);
+      padding: 1px 4px; background: rgba(15, 26, 58, 0.85);
+    }
 
     .nft-selected-info {
       margin-top: 8px; padding-top: 8px;
@@ -591,7 +601,11 @@
     .ops-sep { color: var(--faint); font-size: 10px; }
 
     .crank-section {
-      display: flex; gap: 6px; flex-wrap: wrap;
+      display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    }
+    .crank-balance {
+      font-size: 8px; color: var(--dim); letter-spacing: 0.5px;
+      margin-right: 4px;
     }
     .bounty-header {
       display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 0.8fr;

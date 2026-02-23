@@ -1,21 +1,5 @@
 # claude.md — monke.army codebase context
 
-## Solana development skills — MANDATORY
-
-**You MUST read the relevant skill files below BEFORE writing any Solana program code, bot code, security review, or frontend transaction code. Do not skip this. Read the file first, then write code.**
-
-- **Security checklist:** `ref/solana-dev-skill/skill/security.md`
-- **Anchor programs:** `ref/solana-dev-skill/skill/programs-anchor.md`
-- **Testing:** `ref/solana-dev-skill/skill/testing.md`
-- **IDL + codegen:** `ref/solana-dev-skill/skill/idl-codegen.md`
-- **Frontend:** `ref/solana-dev-skill/skill/frontend-framework-kit.md`
-- **Token-2022:** `ref/solana-dev-skill/skill/confidential-transfers.md`
-- **Full skill index:** `ref/solana-dev-skill/skill/SKILL.md`
-
-Additional security references: `ref/awesome-solana-security/README.md`
-
----
-
 **Limit orders that earn fees, instead of paying them.**
 
 monke.army wraps Meteora DLMM positions on Solana. Set your range as a single-sided LP — **sell the rips** or **buy the dips**. If price moves through your range, Monke's Harvester protects your position against round-trip loss by pulling each bin the moment it converts.
@@ -26,7 +10,7 @@ Performance fee on converted output only (0.3%). 100% of fees to SMB Gen2/Gen3 m
 
 Two on-chain programs. No governance. No staking. No voting.
 
-- **core.rs** — Position management (open, harvest, close, claim fees) + rover system + DAMM v2 fee claiming. Token-2022 V1/V2 CPI branching. Memo CPI on all outbound transfers. `open_position` (SPL Token) + `open_position_v2` (Token-2022 compatible). **Fee routing:** All fees → rover_authority ATAs. SOL fees (Sell side) → `rover_fee_token_y` (WSOL ATA on rover_authority) → `close_rover_token_account` (unwrap) → `sweep_rover` → dist_pool. TOKEN fees (Buy side) → `rover_fee_token_x` (rover_authority ATA) for BidAskOneSide DLMM recycling (no market dump on thin meme pools). **Side derivation:** `open_position` and `open_position_v2` derive `side` (Buy/Sell) from on-chain `active_id` — user parameter ignored. Prevents fee evasion. **`claim_pool_fees`:** CPI into DAMM v2 to claim trading fees from $BANANAS/SOL pool, rover_authority PDA signs as position owner, permissionless crank. Rover ATAs validated before CPI. Discriminator hardcoded. **`close_rover_token_account`:** Permissionless — closes any token account owned by rover_authority (unwraps WSOL to native SOL, reclaims rent for empty ATAs). Destination always rover_authority itself. **Permissionless fallback:** harvest, close, and sweep all use heartbeat + staleness pattern — anyone can call when bot is stale, earns `keeper_tip_bps`. **Rovers:** BidAskOneSide distribution (more tokens at higher bins). `open_rover_position` (external deposits) and `open_fee_rover` (bot-gated fee recycling) both read `active_id` directly from lb_pair on-chain (never trust caller). `sweep_rover` sends SOL to dist_pool (`revenue_dest` — timelocked propose/apply). **Emergency:** `propose_emergency_close` / `apply_emergency_close` (24hr timelocked, transfers any remaining vault tokens to owner as part of closing) for deprecated Meteora pools. Config has 96-byte `_reserved`, RoverAuthority has 64-byte `_reserved` for future fields.
+- **core.rs** — Position management (open, harvest, close, claim fees) + rover system + DAMM v2 fee claiming. All CPI via V2 variants (Token-2022 native). Memo CPI on all outbound transfers. `open_position_v2` only. **Fee routing:** All fees → rover_authority ATAs. SOL fees (Sell side) → `rover_fee_token_y` (WSOL ATA on rover_authority) → `close_rover_token_account` (unwrap) → `sweep_rover` → dist_pool. TOKEN fees (Buy side) → `rover_fee_token_x` (rover_authority ATA) for BidAskImBalanced DLMM recycling (no market dump on thin meme pools). **Side derivation:** `open_position_v2` derives `side` (Buy/Sell) from on-chain `active_id` — user parameter ignored. Prevents fee evasion. **`claim_pool_fees`:** CPI into DAMM v2 to claim trading fees from $BANANAS/SOL pool, rover_authority PDA signs as position owner, permissionless crank. Rover ATAs validated before CPI. Discriminator hardcoded. **`close_rover_token_account`:** Permissionless — closes any token account owned by rover_authority (unwraps WSOL to native SOL, reclaims rent for empty ATAs). Destination always rover_authority itself. **Permissionless fallback:** harvest, close, and sweep all use heartbeat + staleness pattern — anyone can call when bot is stale, earns `keeper_tip_bps`. **Rovers:** BidAskImBalanced distribution (more tokens at higher bins). `open_rover_position` (external deposits) and `open_fee_rover` (bot-gated fee recycling) both read `active_id` directly from lb_pair on-chain (never trust caller). `sweep_rover` sends SOL to dist_pool (`revenue_dest` — timelocked propose/apply). **Emergency:** `propose_emergency_close` / `apply_emergency_close` (24hr timelocked, transfers any remaining vault tokens to owner as part of closing) for deprecated Meteora pools. Config has 96-byte `_reserved`, RoverAuthority has 64-byte `_reserved` for future fields.
 - **monke_bananas.rs** — Feed BANANAS to your Monke. Burn $BANANAS (1M per tx, unlimited stacking) against SMB Gen2 or Gen3 NFTs. **Gen2 = 2x weight, Gen3 = 1x weight per feed.** Per-NFT `MonkeBurn` PDA tracks weight. MasterChef accumulator. Claim always works when paused. `compost_monke`: permissionless cleanup of burned NFTs (supply==0) — subtracts dead weight, closes PDA, rent to caller. MonkeState has 64-byte `_reserved` for future fields. SMB Gen2: `SMBtHCCC6RYRutFEPb4gZqeBLUZbMNhRKaMKZZLHi7W`. SMB Gen3: `8Rt3Ayqth4DAiPnW9MDFi63TiQJHmohfTWLMQFHi4KZH`. Initialize validates `bananas_mint.decimals == 6`.
 
 ## File map
@@ -35,7 +19,7 @@ Two on-chain programs. No governance. No staking. No voting.
 programs/                        — Anchor workspace (build targets)
   bin-farm/src/
     lib.rs                       — core.rs (positions, harvest, close, fees, ROVER)
-    meteora_dlmm_cpi.rs          — CPI module (V1 + V2 + BidAskOneSide + add_liquidity_by_strategy2)
+    meteora_dlmm_cpi.rs          — CPI module (V2 only: BidAskImBalanced + all V2 variants)
   monke-bananas/src/lib.rs       — monke_bananas.rs
 
 src/contracts/                   — Reference copies (keep in sync with programs/)
@@ -52,20 +36,21 @@ bot/                             — Monke's Harvester
 src/
   enlist.js                      — Alpha Vault SDK integration (bundled → dist/enlist.bundle.js)
 
-public/                          — Frontend: Enlist / Trade / Rank / Ops / Recon
-  app.js                         — All page logic, relay WebSocket client, PDA derivation
-  index.html                     — 5 pages (Enlist/Trade/Rank/Ops/Recon), 5-orbit astrolabe
+public/                          — Frontend: Enlist / Trade / Positions / Rank / Ops / Recon
+  app.js                         — All page logic, relay WebSocket client, Codama instruction builders
+  index.html                     — 6 pages (Enlist/Trade/Positions/Rank/Ops/Recon), sigil astrolabe
   styles.css                     — Military monke color system, all page styles + Enlist
   config.json                    — Program IDs, RPC, HELIUS_RPC_URL, BOT_RELAY_URL, ALPHA_VAULT_ADDRESS
 
 scripts/
   deploy-and-init.mjs            — Deploy + initialize both programs (anti-front-run)
-  build-frontend.mjs             — Minify app.js + bundle enlist.js via esbuild
+  build-frontend.mjs             — Bundle app.js (Codama + @solana/kit) + bundle enlist.js via esbuild
+  generate-clients.mjs           — Codama client generation from IDL → src/generated/
 
 meteora-invent/                  — Meteora DAMM v2 launch toolkit (cloned)
   studio/config/damm_v2_config.jsonc — $BANANAS pool + Alpha Vault config
 
-refactor.md                      — Technical debt from Feb 21 session (Box<>, remaining_accounts, V2 CPI)
+src/generated/                   — Codama-generated TypeScript clients (bin-farm + monke-bananas)
 ref/dlmm-sdk/                    — Cloned Meteora DLMM SDK (source of truth for CPI layouts + discriminators)
 Anchor.toml                      — 2 programs, devnet + mainnet
 ```
@@ -103,7 +88,7 @@ Three fee inputs → one destination:
      → sweep_rover → dist_pool
 
 2. Buy-side token fees + rover bribe proceeds
-     rover_authority ATA → open_fee_rover (BidAskOneSide DLMM)
+     rover_authority ATA → open_fee_rover (BidAskImBalanced DLMM)
      → natural trading converts → SOL → sweep_rover → dist_pool
 
 3. DAMM v2 $BANANAS/SOL trading fees (SOL via collectFeeMode=1)
@@ -126,54 +111,58 @@ $BANANAS launched via Meteora Invent DAMM v2 pool with Alpha Vault pro-rata fair
 
 ## Build
 
-`PATH="$HOME/.cargo/bin:$PATH" cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml` (Homebrew cargo doesn't support `+toolchain` — must use rustup cargo). IDL gen skipped (`anchor-syn` incompatible with Rust 1.93). `blake3` pinned to 1.5.5. `init-if-needed` enabled for monke_bananas. `solana-program = "=1.18.26"` for core. No `mpl-token-metadata` dep — raw Metaplex byte parsing.
+`cargo-build-sbf --manifest-path programs/bin-farm/Cargo.toml` (requires Solana CLI 3.0+ with platform-tools v1.47+ for rustc 1.84). Anchor 0.31.1. IDL generation: `anchor idl build -p bin_farm`. `blake3` pinned to 1.5.5, `borsh` pinned to 1.5.5 (avoid indexmap 2.13 incompatibility with BPF rustc). `init-if-needed` enabled for monke_bananas. No `mpl-token-metadata` dep — raw Metaplex byte parsing. Codama client gen: `node scripts/generate-clients.mjs`.
+
+**Run bot:** `npm run bot` (uses `tsx`, loads env from `bot/.env`). IDL files at `bot/idl/*.json` (0.30 spec format — requires `@coral-xyz/anchor@^0.30.1`).
 
 ## Frontend pages
 
-**Pre-launch:** Enlist(0). Trade(1). Rank(2). Ops(3). Recon(4). 5-orbit sigil astrolabe.
-**Post-launch:** Trade(0). Rank(1). Ops(2). Recon(3).
+**Pre-launch:** Enlist(0). Trade(1). Positions(2). Rank(3). Ops(4). Recon(5).
+**Post-launch:** Trade(0). Positions(1). Rank(2). Ops(3). Recon(4).
 
 - **Enlist** — Alpha Vault fair launch (page 0, landing page). 3 phases: 2-week countdown → deposit SOL → claim $BANANAS. `src/enlist.js` bundled via esbuild with `@meteora-ag/alpha-vault` SDK. Gold `--bananas` accent. Pulled after launch.
-- **Trade** — DLMM harvester. Order form + positions. Live data from relay. Mint `--mint` accent.
-- **Rank** — Sub-pages: Monke (feed/claim) + Roster (leaderboard/lookup). Gold `--bananas` accent.
-- **Ops** — War room. LaserStream feed, bounty board, permissionless crank. Gray `--fg` accent.
-- **Recon** — Token intelligence. Rover TVL leaderboard, top-5 analytics, bribes. Click-to-trade. Mint `--mint` accent.
+- **Trade** — DLMM harvester. Order form + bin viz. Default pool: SOL/USDC (`BGm1tav58oGcsQJehL9WXBFXF7D27vZsKefj4xJKD5Y`). Live data from relay. Mint `--mint` accent.
+- **Positions** — All wallet positions. Inline close + claim fees buttons per row. Stats grid (count, deposited, harvested, avg fill).
+- **Rank** — Sub-pages: Monke (NFT carousel, feed/claim, MonkeBurn PDA reading) + Roster (leaderboard via `getProgramAccounts`, global stats from MonkeState). Gold `--bananas` accent.
+- **Ops** — War room. Live activity feed, bounty board from `/api/pending-harvests`, permissionless harvest/sweep/deposit cranks. SOL balances for rover_authority + dist_pool shown. Gray `--fg` accent.
+- **Recon** — Deferred. Rover TVL leaderboard, top-5 analytics, bribes. Mint `--mint` accent.
 
 ## Known issues
 
 - **$BANANAS decimals: 6** — `BANANAS_PER_FEED = 1_000_000_000_000` is correct.
-- **Token-2022 transfer hooks unsupported** — V1/V2 branching works but transfer hook extra accounts are not resolved.
-- **V1 `open_position` untested post-Box<> changes** — SPL-only pools should work but haven't been smoke-tested on mainnet.
+- **Token-2022 transfer hooks unsupported** — All CPI is V2 but transfer hook extra accounts are not resolved. `RemainingAccountsInfo::empty_hooks()` used everywhere.
+- **Yellowstone gRPC v5:** `@triton-one/yellowstone-grpc@^5.0.2` requires explicit `await client.connect()` before `client.subscribe()`. The constructor does not establish the gRPC connection.
 
-## Critical implementation notes (Feb 21, 2026)
+## Implementation notes
 
-**Do not remove `Box<>` wrappers.** Every `Account<'info, T>` in every instruction struct is `Box`ed to avoid BPF 4KB stack frame overflow. Removing any `Box<>` will cause access violations at runtime. `OpenPositionV2` is at exactly 4096 bytes — one more named `AccountInfo` field will overflow it.
+**All CPI is V2.** `initialize_position2`, `add_liquidity_by_strategy2`, `remove_liquidity_by_range2`, `claim_fee2`, `close_position2`. No V1 code remains.
 
-**`OpenPositionV2` remaining_accounts contract (6 accounts, order matters):**
-- `[0]` bin_array_lower (writable)
-- `[1]` bin_array_upper (writable)
-- `[2]` event_authority (read-only)
-- `[3]` dlmm_program (read-only, validated via `require!()` in body)
-- `[4]` token_x_mint (read-only)
-- `[5]` token_y_mint (read-only)
+**Do not remove `Box<>` wrappers.** Every `Account<'info, T>` is `Box`ed to avoid BPF 4KB stack frame overflow. Removing any `Box<>` will cause access violations at runtime.
 
-These were moved out of the struct to fit the stack frame. No Anchor validation — Meteora validates bin arrays and event_authority via CPI; dlmm_program checked manually; mints passed through to CPI.
+**Rover remaining_accounts (2).** `open_rover_position` and `open_fee_rover` pass `event_authority` + `dlmm_program` via remaining_accounts (BPF stack constraint from init accounts). Only the bot calls these.
 
-**`open_position_v2` uses `add_liquidity_by_strategy2` (NOT `add_liquidity_by_strategy_one_side`):**
-- Strategy type: `SpotImBalanced` (enum value 6). The two-sided V2 instruction rejects one-sided strategy types.
-- `RemainingAccountsInfo::empty_hooks()` — 2 empty transfer hook slices (TransferHookX + TransferHookY, both length 0). NOT `::none()`.
-- `active_id` parameter: pool's actual active bin from lb_pair bytes, NOT `min_bin_id`.
-- For buy: `amount_x = 0, amount_y = deposit`. For sell: `amount_x = deposit, amount_y = 0`.
+**`bitmap_ext` is NOT `#[account(mut)]`.** The DLMM program ID placeholder (when no bitmap extension exists) is executable and can't be writable. CPI module uses `bitmap_meta()` helper.
 
-**`bitmap_ext` is NOT `#[account(mut)]` in any struct.** Removed globally because the DLMM program ID placeholder (used when no bitmap extension exists) is executable and can't be writable. CPI module uses `bitmap_meta()` helper to conditionally set writable based on `is_writable`.
+**Source of truth for Meteora CPI:** `ref/dlmm-sdk/` — IDL at `ref/dlmm-sdk/idls/dlmm.json`, SDK at `ref/dlmm-sdk/ts-client/src/dlmm/`. Do not guess discriminators or account layouts.
 
-**Source of truth for Meteora CPI:** `ref/dlmm-sdk/` (cloned from `github.com/MeteoraAg/dlmm-sdk`). Use the IDL at `ref/dlmm-sdk/idls/dlmm.json` and the SDK at `ref/dlmm-sdk/ts-client/src/dlmm/` to verify discriminators, account layouts, and strategy types. Do not guess.
+**Codama clients integrated** into `app.js`. Generated at `src/generated/` from IDL via `node scripts/generate-clients.mjs`. All 10 program instructions use Codama-generated builders. All account deserialization uses Codama decoders. esbuild bundles `@solana/kit` + `src/generated/` into the IIFE output.
 
-**See `refactor.md`** for full technical debt ledger and the proper fix path (program split, InterfaceAccount, LazyAccount, unified V2).
+**Frontend adapter layer:** Three functions in `app.js` bridge `@solana/kit` types ↔ `@solana/web3.js`:
+- `kitIxToWeb3(ix)` — converts Codama `Instruction` to web3.js `TransactionInstruction` (AccountRole bit flags)
+- `asSigner(pubkey)` — wraps web3.js `PublicKey` as `@solana/kit` `TransactionSigner` shim
+- `toEncodedAccount(pubkey, data, programAddr)` — wraps RPC data for Codama decoders
 
-## Deployment status (Feb 16, 2026)
+**What stays manual (external programs, no Codama clients):**
+- Meteora LbPair / BinArray parsing (`parseLbPair`, `parseBinArrayData`, `LBPAIR_OFFSETS`)
+- Meteora PDAs (`deriveBinArrayPDA`, `deriveEventAuthorityPDA`, `deriveBitmapExtPDA`)
+- `resolveMeteoraCPIAccounts` (reads on-chain LbPair for reserves/mints/programs)
+- ATA / SystemProgram / SyncNative helpers
+- Metaplex metadata PDA
+- PDA derivation functions (still needed for ATA resolution and RPC fetches)
 
-**Mainnet — live.** Programs deployed, initialized, authorities verified. Pool + Alpha Vault live. LP permanently locked.
+## Deployment status
+
+**Mainnet — live.** Programs deployed, initialized. All CPI V2. Bot running locally. Frontend complete. PM2 + Vercel configs ready.
 
 - **$BANANAS mint:** `ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w`
 - **DAMM v2 pool:** `GxC4SFsT2sJEPjgXziBmCnBkrpvwYzZYWPoWRpTj9jZR`
@@ -188,20 +177,59 @@ These were moved out of the struct to fit the stack frame. No Anchor validation 
 - **Dist pool PDA:** `2uZxacLniw264zRpr84qGW4NcYkTv3M448733t6MRK1e`
 - **Program vault PDA:** `6r63srLezrtjiYwwoVwMB82o3c7mwz3BUktGiHRq4FxX`
 
-## Next steps
+## Next steps — Local E2E testing
 
-1. Provision bot server, start keeper (Phase 3)
-2. E2E smoke test: full loop (open → harvest → close → sweep → feed → claim)
-3. Test V1 `open_position` on SPL-only pool
-4. Wire remaining frontend tx building (Rank, Ops, Recon) — see `frontend-dev.md`
+Run the full loop locally before deploying to infra. Both bot and frontend run on localhost.
+
+### 1. Bot setup
+
+```bash
+cp bot/anchor-harvest-bot.env.example bot/.env
+# Edit bot/.env — fill these three:
+#   RPC_URL=<Helius Pro RPC URL>
+#   GRPC_ENDPOINT=<Helius LaserStream gRPC URL with ?api-key=XXX>
+#   BOT_KEYPAIR_PATH=<path to your keypair JSON>
+# All other values (program IDs, DAMM v2 addresses) are pre-filled.
+npm run bot
+# Verify: curl http://localhost:8080/api/stats
+```
+
+Bot runs on port 8080 (health + relay WebSocket at `/ws` + REST at `/api/*`). Frontend connects to `ws://localhost:8080` (already set in `public/config.json` → `BOT_RELAY_URL`).
+
+### 2. Frontend dev server
+
+```bash
+npx vite public
+# Opens at http://localhost:5173 (Vite resolves ES imports from src/generated/ natively)
+```
+
+`public/config.json` has `HELIUS_RPC_URL` for direct RPC and `BOT_RELAY_URL: "ws://localhost:8080"` for relay. Both are already configured for local dev.
+
+### 3. E2E test runbook
+
+Walk through `TODO.md` Tier 2 checklist with wallet connected + real SOL (0.01-0.1 SOL per test). Every instruction path now uses Codama-generated builders — this validates the migration end-to-end.
+
+Test order (matches dependency chain):
+1. **Open position** (Trade page) — exercises `getOpenPositionV2InstructionAsync`
+2. **Wait for harvest** (Ops feed) — bot calls `harvest_bins` via its own path
+3. **Close position** (Positions page) — exercises `getUserCloseInstructionAsync`
+4. **Claim LP fees** (Positions page) — exercises `getClaimFeesInstruction`
+5. **Feed monke** (Rank page) — exercises `getFeedMonkeInstructionAsync`
+6. **Sweep + Deposit** (Ops page) — exercises `getSweepRoverInstructionAsync` + `getDepositSolInstructionAsync`
+7. **Claim SOL** (Rank page) — exercises `getClaimInstructionAsync`
+8. **Permissionless harvest** (Ops bounty board) — exercises `getHarvestBinsInstructionAsync` from frontend
+
+### After local testing
+
+- Deploy bot to server (PM2 config at `bot/ecosystem.config.cjs`)
+- Deploy frontend (Vercel config at `vercel.json`)
+- Rotate Helius API key before repo goes public
 
 ## Reference docs
 
 | Doc | What it covers |
 |-----|---------------|
 | `whitepaper.md` | Product narrative, mechanics, gamma scalping thesis, FAQ |
-| `frontend-dev.md` | Frontend build plan — Enlist/Trade/Rank/Ops/Recon + LaserStream relay |
-| `refactor.md` | Technical debt from Feb 21 session — Box<>, remaining_accounts, V2 CPI, program split plan |
-| `TODO.md` | Deploy checklist + fair launch + funding + audit fixes |
-| `frontend-fix.md` | Frontend UX issues (design/layout, not tx building) |
+| `src/generated/` | Codama-generated TypeScript clients for bin_farm + monke_bananas (imported by app.js) |
+| `TODO.md` | Task list: security, deploy, E2E tests, features, BD |
 | `meteora-invent/studio/config/damm_v2_config.jsonc` | DAMM v2 pool + Alpha Vault launch config (executed Feb 16) |

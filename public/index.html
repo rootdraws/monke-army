@@ -237,12 +237,12 @@
           <div class="range-section">
             <div class="range-row">
               <span class="range-label">from</span>
-              <input type="number" class="range-input" id="rangeNear" value="0.5" min="0.1" step="0.1">
+              <input type="number" class="range-input" id="rangeNear" value="5" min="0.1" step="0.1">
               <span class="range-suffix" id="rangeSuffix">% below</span>
             </div>
             <div class="range-row">
               <span class="range-label">to</span>
-              <input type="number" class="range-input" id="rangeFar" value="7" min="0.1" step="0.5">
+              <input type="number" class="range-input" id="rangeFar" value="35" min="0.1" step="0.5">
               <span class="range-suffix" id="rangeSuffixFar">% below</span>
             </div>
           </div>
@@ -274,7 +274,7 @@
         <div><div class="stat-label">avg fill</div><div class="stat-value" id="posPageAvgFill">0%</div></div>
       </div>
 
-      <div class="pos-page-header"><span>pool</span><span>side</span><span>range</span><span>filled</span><span>amount</span><span>status</span></div>
+      <div class="pos-page-header"><span>pool</span><span>side</span><span>range</span><span>filled</span><span>amount</span><span>status</span><span></span><span></span></div>
       <div id="allPositionsList"><div class="empty-state">connect wallet to view positions</div></div>
 
     </div>
@@ -299,9 +299,14 @@
             <!-- LEFT: NFT selector -->
             <div class="monke-nft-panel">
               <div class="stat-label" style="margin-bottom:12px;">your monkes</div>
-              <div class="nft-grid" id="nftGrid">
-                <div class="empty-state" style="padding:20px;">connect wallet</div>
+              <div class="nft-carousel" id="nftCarousel">
+                <button class="carousel-arrow carousel-left" id="nftPrev" style="display:none;">&#9664;</button>
+                <div class="carousel-frame" id="nftFrame">
+                  <div class="empty-state" style="padding:20px;">connect wallet</div>
+                </div>
+                <button class="carousel-arrow carousel-right" id="nftNext" style="display:none;">&#9654;</button>
               </div>
+              <div class="carousel-counter" id="nftCounter"></div>
               <div class="nft-selected-info" id="nftSelectedInfo" style="display:none;">
                 <div class="nft-selected-name" id="nftSelectedName">—</div>
                 <div class="nft-selected-gen" id="nftSelectedGen">—</div>
@@ -322,8 +327,7 @@
               </div>
 
               <div class="monke-actions-bar">
-                <button class="action-btn-sm" id="feedMonkeBtn">feed 1M $BANANAS</button>
-                <button class="action-btn-sm" id="claimAllBtn">claim all</button>
+                <button class="action-btn-sm" id="feedMonkeBtn">Burn 1M $BANANAS to your Monke.</button>
               </div>
 
               <div class="monke-header"><span>monke</span><span>gen</span><span>weight</span><span>claimable</span><span></span></div>
@@ -352,7 +356,13 @@
         </div>
         <div id="monkeBurnResult"></div>
 
-        <div class="monke-header"><span>#</span><span>monke</span><span>gen</span><span>weight</span><span>unclaimed est.</span></div>
+        <div class="stats-grid" style="margin-bottom:16px;">
+          <div><div class="stat-label">total burned</div><div class="stat-value bananas" id="globalBananasBurned">0</div></div>
+          <div><div class="stat-label">total weight</div><div class="stat-value" id="globalTotalWeight">0</div></div>
+          <div><div class="stat-label">SOL distributed</div><div class="stat-value green" id="globalSolDistributed">0</div></div>
+        </div>
+
+        <div class="monke-header"><span>#</span><span>monke</span><span>weight</span><span>claimed</span></div>
         <div id="rosterList"><div class="empty-state">loading roster...</div></div>
       </div>
 
@@ -377,15 +387,14 @@
           <span class="stat-label">bot</span> <span class="stat-value-inline" id="opsBotStatus">offline</span>
         </div>
         <div class="crank-section">
-          <button class="action-btn-sm" id="crankSweep">sweep</button>
+          <button class="action-btn-sm" id="crankSweep">sweep</button><span class="crank-balance" id="opsSweepBalance"></span>
+          <button class="action-btn-sm" id="crankDeposit">deposit</button><span class="crank-balance" id="opsDepositBalance"></span>
           <button class="action-btn-sm" id="crankDistribute">distribute</button>
-          <button class="action-btn-sm" id="crankDeposit">deposit</button>
-          <button class="action-btn-sm" id="crankCompost">compost</button>
         </div>
       </div>
 
       <!-- Bounty board -->
-      <div class="bounty-header"><span>pool</span><span>bins</span><span>reward</span><span>stale</span><span></span></div>
+      <div class="bounty-header"><span>pool</span><span>bins</span><span>side</span><span>status</span><span></span></div>
       <div id="bountyBoard"><div class="empty-state" style="padding:16px;">no pending harvests</div></div>
       <div class="bounty-actions">
         <button class="action-btn-sm" id="harvestAllBtn">harvest all</button>

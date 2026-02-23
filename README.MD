@@ -8,22 +8,22 @@ Managed Meteora DLMM positions with sub-second bin harvesting via Helius LaserSt
 
 | Program | Description |
 |---------|-------------|
-| `core.rs` | Position management. Open, harvest, close. Performance fee on converted output — SOL fees → rover_authority → dist_pool, TOKEN fees → rover_authority (BidAskOneSide DLMM recycling, no market dump). `claim_pool_fees` for DAMM v2 trading fee collection. Supports SPL Token and Token-2022. Permissionless fallback on harvest + close (heartbeat + staleness). Rovers use BidAskOneSide distribution. Emergency escape hatch for deprecated pools. |
+| `core.rs` | Position management. Open, harvest, close. All CPI via V2 variants (Token-2022 native). Performance fee on converted output — SOL fees → rover_authority → dist_pool, TOKEN fees → rover_authority (BidAskImBalanced DLMM recycling, no market dump). `claim_pool_fees` for DAMM v2 trading fee collection. Permissionless fallback on harvest + close (heartbeat + staleness). Rovers use BidAskImBalanced distribution. Emergency escape hatch for deprecated pools. |
 | `monke_bananas.rs` | Feed BANANAS to your Monke. Burn $BANANAS (1M per tx, unlimited stacking) against SMB Gen2 (2x weight) or Gen3 (1x weight) NFTs. MasterChef accumulator. 100% of all fees flow to fed monke holders. `compost_monke`: permissionless cleanup of burned NFTs. |
 
 ## How It Works
 
 Users deposit single-sided liquidity into Meteora DLMM bins via the core program — sell the rips (tokens above price) or buy the dips (SOL below price). A vault PDA owns the Meteora position on behalf of the user. As price moves through bins, Monke's Harvester detects fully-converted bins in sub-second via Helius LaserStream gRPC and calls `harvest_bins` to withdraw them. Tokens flow Meteora → vault ATA → owner wallet in a single instruction.
 
-Performance fee (0.3%) is taken on converted output only. All fees flow through rover_authority directly to dist_pool — 100% to monke holders. No splitter, no dev fee, no governance. TOKEN fees route to rover_authority for BidAskOneSide DLMM recycling — no market dumping on thin meme pools. DAMM v2 $BANANAS/SOL trading fees are claimed via `claim_pool_fees` through rover_authority. Unconverted deposits return untaxed.
+Performance fee (0.3%) is taken on converted output only. All fees flow through rover_authority directly to dist_pool — 100% to monke holders. No splitter, no dev fee, no governance. TOKEN fees route to rover_authority for BidAskImBalanced DLMM recycling — no market dumping on thin meme pools. DAMM v2 $BANANAS/SOL trading fees are claimed via `claim_pool_fees` through rover_authority. Unconverted deposits return untaxed.
 
 ### Key Instructions
 
 ```
-open_position(pool, amount, min_bin, max_bin, side, max_active_bin_slippage)
-open_position_v2(...)   — same args, Token-2022 compatible
+open_position_v2(pool, amount, min_bin, max_bin, side, max_active_bin_slippage)
   → No fee. 100% deposited into Meteora bins.
   → `side` is derived on-chain from active_id (parameter ignored).
+  → Token-2022 native. All CPI via V2 variants.
 
 harvest_bins(bin_ids: Vec<i32>)
   → SOL fees → rover_authority → dist_pool (100% to monke holders). TOKEN fees → rover_authority (DLMM recycling)
@@ -47,12 +47,12 @@ compost_monke()
   → Subtracts dead weight. Rent refund to caller.
 
 open_rover_position(amount, bin_step)
-  → Anyone deposits bribe tokens into sell-side BidAskOneSide DLMM position.
+  → Anyone deposits bribe tokens into sell-side BidAskImBalanced DLMM position.
   → active_id read from on-chain lb_pair (never trust caller).
   → Position owned by rover_authority PDA. One-way. No refunds.
 
 open_fee_rover(amount, bin_step)
-  → Bot-gated. Opens BidAskOneSide position from accumulated fee tokens
+  → Bot-gated. Opens BidAskImBalanced position from accumulated fee tokens
     in rover_authority ATAs. Bot pays rent.
 
 sweep_rover()
@@ -88,7 +88,7 @@ bin-farm/
 ├── programs/                      # Anchor workspace (build targets)
 │   ├── bin-farm/src/
 │   │   ├── lib.rs                 # Core program (positions, harvest, close, fees, rovers)
-│   │   └── meteora_dlmm_cpi.rs   # Meteora DLMM CPI wrappers (V1 + V2 + BidAskOneSide + add_liquidity_by_strategy2)
+│   │   └── meteora_dlmm_cpi.rs   # Meteora DLMM CPI wrappers (V2 only)
 │   └── monke-bananas/src/lib.rs   # Burn $BANANAS, stack weight, claim SOL, compost dead monkes
 ├── src/
 │   ├── contracts/                 # Reference copies (keep in sync with programs/)
@@ -108,23 +108,23 @@ bin-farm/
 │   ├── harvest-executor.ts        # Job queue: harvest/close tx (emits events to relay)
 │   ├── keeper.ts                  # MonkeKeeper: Saturday sequencer + rover TVL computation
 │   └── logger.ts                  # Pino structured logging
-├── public/                        # Frontend: Enlist / Trade / Rank / Ops / Recon
-│   ├── index.html                 # 5 pages (Enlist/Trade/Rank/Ops/Recon) + 5-orbit astrolabe
+├── public/                        # Frontend: Enlist / Trade / Positions / Rank / Ops / Recon
+│   ├── index.html                 # 6 pages (Enlist/Trade/Positions/Rank/Ops/Recon) + sigil astrolabe
 │   ├── styles.css                 # Military monke color palette + all page styles
-│   ├── app.js                     # Page logic, relay WebSocket client, PDA derivation
+│   ├── app.js                     # Page logic, relay WebSocket client, Codama instruction builders
 │   └── config.json                # Program IDs, RPC, BOT_RELAY_URL, ALPHA_VAULT_ADDRESS
 ├── scripts/
 │   ├── deploy-and-init.mjs        # Deploy + init atomically (anti-front-run)
-│   └── build-frontend.mjs         # Frontend build: minify app.js + bundle enlist.js
+│   ├── build-frontend.mjs         # Frontend build: bundle app.js (Codama + @solana/kit) + enlist.js
+│   └── generate-clients.mjs       # Codama client generation from IDL → src/generated/
 ├── meteora-invent/                # Meteora DAMM v2 launch toolkit (cloned)
 │   └── studio/config/damm_v2_config.jsonc  # $BANANAS pool + Alpha Vault config (locked params)
 ├── Anchor.toml                    # Workspace config (2 programs, devnet + mainnet)
 ├── Cargo.toml                     # Workspace root
 ├── whitepaper.md                  # Product overview + mechanics
-├── frontend-dev.md                # Frontend build plan: Enlist/Trade/Rank/Ops/Recon
-├── refactor.md                    # Technical debt from Feb 21 session (Box<>, remaining_accounts, V2 CPI)
-├── TODO.md                        # Blockers, checklist, launch prep
-└── ref/dlmm-sdk/                  # Cloned Meteora DLMM SDK (source of truth for CPI layouts)
+├── TODO.md                        # Task list
+├── ref/dlmm-sdk/                  # Cloned Meteora DLMM SDK (source of truth for CPI layouts)
+└── src/generated/                 # Codama-generated TypeScript clients
 ```
 
 ## Build & Deploy
@@ -148,14 +148,32 @@ BOT_PUBKEY=<bot-key> BANANAS_MINT=<mint> \
 node scripts/deploy-and-init.mjs --verify-only
 ```
 
-Note: `blake3` pinned to 1.5.5. If you `cargo update`, re-pin with `cargo update -p blake3 --precise 1.5.5`.
+Note: `blake3` pinned to 1.5.5, `borsh` pinned to 1.5.5. If you `cargo update`, re-pin both:
+```bash
+cargo update -p blake3 --precise 1.5.5
+cargo update -p borsh@1.6.0 --precise 1.5.5
+```
+
+### IDL & Client Generation
+
+```bash
+# Generate IDL from on-chain program structs (Anchor 0.31.1)
+anchor idl build -p bin_farm -o bot/idl/bin_farm.json
+anchor idl build -p monke_bananas -o bot/idl/monke_bananas.json
+
+# Generate Codama TypeScript clients from IDL
+node scripts/generate-clients.mjs
+# Output: src/generated/bin-farm/ + src/generated/monke-bananas/
+```
+
+Regenerate after any on-chain struct change. IDL files at `bot/idl/` are used by the bot's Anchor client. Codama clients at `src/generated/` provide typed instruction builders and account decoders for the frontend (`app.js` imports them via esbuild bundling).
 
 ## Run Monke's Harvester
 
 ```bash
-cd bot/
-cp anchor-harvest-bot.env.example .env
-npx ts-node anchor-harvest-bot.ts
+cp bot/anchor-harvest-bot.env.example bot/.env
+# Edit bot/.env — set RPC_URL, GRPC_ENDPOINT, BOT_KEYPAIR_PATH, etc.
+npm run bot
 ```
 
 Required env vars: `RPC_URL`, `GRPC_ENDPOINT`, `BOT_KEYPAIR_PATH`, `CORE_PROGRAM_ID`, `MONKE_BANANAS_PROGRAM_ID`, `BANANAS_MINT`. Plus DAMM v2 vars when pool is live: `DAMM_V2_POOL`, `DAMM_V2_POSITION`, `DAMM_V2_POSITION_NFT`, `DAMM_V2_TOKEN_A_MINT`, `DAMM_V2_TOKEN_B_MINT`, `DAMM_V2_TOKEN_A_VAULT`, `DAMM_V2_TOKEN_B_VAULT`.
@@ -164,7 +182,7 @@ Saturday sequence:
 1. Claim DAMM v2 pool trading fees → rover_authority
 2. Close WSOL ATAs on rover_authority (unwrap to native SOL)
 3. Sweep SOL from rover_authority → dist_pool
-4. Open fee rover positions from accumulated token fees (BidAskOneSide DLMM)
+4. Open fee rover positions from accumulated token fees (BidAskImBalanced DLMM)
 5. Deposit SOL from dist_pool → monke program vault → accumulator
 6. Close exhausted rover positions (reclaim rent)
 
@@ -177,7 +195,7 @@ npx vite public                               # dev (HMR)
 npm run build:frontend && npx serve dist      # production
 ```
 
-Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page, 2-week countdown → deposit → claim), **Trade** (DLMM harvester), **Rank** (monke feed/claim, sub-pages: Monke + Roster), **Ops** (LaserStream war room + bounty board + permissionless crank), **Recon** (rover TVL leaderboard + top-5 analytics + bribes). 5-page navigation with sigil astrolabe. Bot relay provides live data via WebSocket (`/ws`) and REST (`/api/*`) on the same health server port. See `frontend-dev.md` for full build plan.
+Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page), **Trade** (DLMM harvester, default SOL/USDC pool), **Positions** (all wallet positions with inline close + claim fees), **Rank** (monke feed/claim + leaderboard, sub-pages: Monke + Roster), **Ops** (bounty board + permissionless crank + live stats from relay), **Recon** (rover TVL — deferred). 6-page navigation with sigil astrolabe. Bot relay provides live data via WebSocket (`/ws`) and REST (`/api/*`) on the same health server port.
 
 ## Mainnet Addresses
 
@@ -245,13 +263,15 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page, 
 ## Dependencies
 
 - Solana CLI 3.0+ (Agave) or 1.18+
-- Anchor 0.30.1
+- Anchor 0.31.1
 - Rust (via rustup)
 - Node.js 18+
 - Meteora DLMM SDK (`@meteora-ag/dlmm`)
 - Meteora Alpha Vault SDK (`@meteora-ag/alpha-vault`)
 - Helius LaserStream gRPC (`@triton-one/yellowstone-grpc`)
-- esbuild (build: minify + bundle)
+- tsx (TypeScript execution for bot)
+- `@solana/kit` (Codama-generated client runtime)
+- esbuild (build: bundle + minify)
 
 ## License
 

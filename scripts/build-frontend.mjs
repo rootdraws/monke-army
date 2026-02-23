@@ -1,9 +1,9 @@
 /**
  * build-frontend.mjs
  *
- * Minimal build pipeline for the vanilla JS frontend.
+ * Build pipeline for the vanilla JS frontend.
  *
- * Minifies public/app.js → dist/app.min.js with source map.
+ * Bundles public/app.js → dist/app.min.js (resolves @solana/kit + src/generated/ Codama clients).
  * Copies public/index.html → dist/index.html with script path updated.
  * Copies public/config.json → dist/config.json.
  *
@@ -25,17 +25,28 @@ const distDir = join(root, 'dist');
 // Ensure dist/ exists
 mkdirSync(distDir, { recursive: true });
 
-// 1. Minify app.js with esbuild
-console.log('Minifying app.js...');
+// 1. Bundle + minify app.js (resolves imports from @solana/kit + src/generated/)
+console.log('Bundling app.js...');
 const result = await esbuild.build({
   entryPoints: [join(publicDir, 'app.js')],
   outfile: join(distDir, 'app.min.js'),
-  bundle: false, // single file, no bundling needed (uses global solanaWeb3 from CDN)
+  bundle: true,
   minify: true,
   sourcemap: true,
   target: ['es2020'],
   format: 'iife',
   charset: 'utf8',
+  define: {
+    'process.env.NODE_ENV': '"production"',
+    'process.env.BROWSER': '"true"',
+    'process.version': '""',
+    'process.platform': '""',
+    'process.stdout': 'null',
+    'process.stderr': 'null',
+    global: 'globalThis',
+  },
+  inject: [join(root, 'scripts', 'process-shim.mjs')],
+  external: [],
 });
 
 if (result.errors.length > 0) {
@@ -91,10 +102,13 @@ html = html.replace('src="app.js"', 'src="app.min.js"');
 html = html.replace('src="enlist.bundle.js"', 'src="enlist.bundle.js"'); // no change needed, already correct path
 writeFileSync(join(distDir, 'index.html'), html);
 
-// 4. Copy config.json
-if (existsSync(join(publicDir, 'config.json'))) {
-  copyFileSync(join(publicDir, 'config.json'), join(distDir, 'config.json'));
-  console.log('Copied config.json');
+// 4. Copy static assets
+for (const file of ['config.json', 'styles.css']) {
+  const src = join(publicDir, file);
+  if (existsSync(src)) {
+    copyFileSync(src, join(distDir, file));
+    console.log(`Copied ${file}`);
+  }
 }
 
 console.log(`\nBuild complete → ${distDir}/`);

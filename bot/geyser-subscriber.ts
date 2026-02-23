@@ -16,7 +16,7 @@
  *
  * Parses full LbPairInfo from raw account bytes — activeId, binStep
  * (sanity check), tokenXMint, tokenYMint, reserves, and token program
- * flags (V1/V2 detection without SDK). Pool metadata flows through
+ * flags (token program resolution for V2 CPI). Pool metadata flows through
  * HarvestJob to the executor, eliminating redundant DLMM SDK calls.
  *
  * Reliability:
@@ -529,6 +529,7 @@ export class GeyserSubscriber extends EventEmitter {
       const cleanEndpoint = `${url.protocol}//${url.host}${url.pathname}`;
 
       const client = new Client(cleanEndpoint, token, undefined);
+      await client.connect();
       this.stream = await client.subscribe();
 
       // ── Build subscription request ──
@@ -622,7 +623,7 @@ export class GeyserSubscriber extends EventEmitter {
       logger.info(`[geyser] Connected. Watching ${this.positionsByPool.size} pools, ${this.positions.size} positions`);
     } catch (e: any) {
       logger.error(`[geyser] Connection failed: ${e.message}`);
-      this.handleDisconnect();
+      throw e;
     }
   }
 

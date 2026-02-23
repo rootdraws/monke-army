@@ -14,9 +14,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
-use anchor_lang::solana_program::sysvar;
-use anchor_spl::token::{Token, TokenAccount, Mint, Transfer, transfer};
-use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token::{TokenAccount, Mint, Transfer, transfer};
 
 mod meteora_dlmm_cpi;
 use meteora_dlmm_cpi::*;
@@ -46,33 +44,6 @@ pub const DAMM_V2_PROGRAM_ID: Pubkey =
 /// DAMM v2 claim_position_fee discriminator — SHA256("global:claim_position_fee")[0..8]
 /// Hardcoded to avoid runtime hash computation and ensure correctness.
 pub const DAMM_V2_CLAIM_FEE_DISC: [u8; 8] = [0xb4, 0x26, 0x9a, 0x11, 0x85, 0x21, 0xa2, 0xd3];
-
-/// === V1/V2 Token Program Branching ===
-///
-/// Meteora DLMM has two sets of CPI instructions:
-///   - V1 (standard SPL Token): remove_liquidity_by_range, claim_fee, close_position
-///   - V2 (Token-2022):         remove_liquidity_by_range2, claim_fee2, close_position2
-///
-/// Detection: check if either mint's owner == TOKEN_2022_PROGRAM_ID.
-/// If either side is Token-2022, ALL CPI calls use V2 variants.
-///
-/// V2 differences:
-///   - Requires `memo_program` account
-///   - Requires `RemainingAccountsInfo` in some calls
-///   - Uses different 8-byte discriminators (see meteora_dlmm_cpi.rs)
-///
-/// The bot reads `token_mint_x_program_flag` / `token_mint_y_program_flag`
-/// directly from the LbPair account bytes (offsets 880-881) via gRPC,
-/// so it knows which accounts to pass without replicating this check.
-///
-/// Functions with V1/V2 branches:
-///   - harvest_bins (1 branch: remove liquidity)
-///   - close_position (3 branches: remove, claim_fee, close)
-///   - user_close (3 branches: remove, claim_fee, close)
-///   - claim_fees (1 branch: claim_fee)
-fn uses_token_2022(mint_info: &AccountInfo) -> bool {
-    *mint_info.owner == TOKEN_2022_PROGRAM_ID
-}
 
 #[program]
 pub mod bin_farm {
@@ -111,17 +82,12 @@ pub mod bin_farm {
         Ok(())
     }
 
-    /// Open a single-sided bin position
-    /// BUY  = deposit Y/SOL below price -> receive X/token when filled
-    /// SELL = deposit X/token above price -> receive Y/SOL when filled
-    // max_active_bin_slippage is now a parameter instead of hardcoded 5.
-    // Allows customization per pool volatility. Default: 5 for stable, up to 15-20 for memes.
-    pub fn open_position(
-        ctx: Context<OpenPosition>,
+    pub fn open_position_v2<'info>(
+        ctx: Context<'_, '_, 'info, 'info, OpenPositionV2<'info>>,
         amount: u64,
         min_bin_id: i32,
         max_bin_id: i32,
-        side: Side,
+        _side: Side,
         max_active_bin_slippage: i32,
     ) -> Result<()> {
         require!(!ctx.accounts.config.paused, CoreError::Paused);
@@ -132,6 +98,29 @@ pub mod bin_farm {
         let width = max_bin_id - min_bin_id + 1;
         require!(width <= MAX_POSITION_WIDTH, CoreError::PositionTooWide);
 
+        // Validate DLMM program
+        require!(ctx.accounts.dlmm_program.key() == METEORA_DLMM_PROGRAM_ID, CoreError::InvalidProgram);
+
+        // Validate token account owners (moved from struct constraints for stack savings)
+        {
+            let data = ctx.accounts.user_token_account.try_borrow_data()?;
+            require!(data.len() >= 64, CoreError::InvalidTokenOwner);
+            let owner = Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)?;
+            require!(owner == ctx.accounts.user.key(), CoreError::InvalidTokenOwner);
+        }
+        {
+            let data = ctx.accounts.vault_token_x.try_borrow_data()?;
+            require!(data.len() >= 64, CoreError::InvalidTokenOwner);
+            let owner = Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)?;
+            require!(owner == ctx.accounts.vault.key(), CoreError::InvalidTokenOwner);
+        }
+        {
+            let data = ctx.accounts.vault_token_y.try_borrow_data()?;
+            require!(data.len() >= 64, CoreError::InvalidTokenOwner);
+            let owner = Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)?;
+            require!(owner == ctx.accounts.vault.key(), CoreError::InvalidTokenOwner);
+        }
+
         // Derive side from on-chain active_id — never trust caller
         let active_id = {
             let data = ctx.accounts.lb_pair.try_borrow_data()?;
@@ -141,20 +130,40 @@ pub mod bin_farm {
         require!(active_id > -443636 && active_id < 443636, CoreError::InvalidBinRange);
         let side = if min_bin_id > active_id { Side::Sell } else { Side::Buy };
 
-        // Transfer deposit to vault
-        transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.user_token_account.to_account_info(),
-                    to: ctx.accounts.vault_token_account.to_account_info(),
-                    authority: ctx.accounts.user.to_account_info(),
-                },
-            ),
-            amount,
+        let deposit_token_program = if side == Side::Sell {
+            &ctx.accounts.token_x_program
+        } else {
+            &ctx.accounts.token_y_program
+        };
+
+        let deposit_vault = if side == Side::Sell {
+            &ctx.accounts.vault_token_x
+        } else {
+            &ctx.accounts.vault_token_y
+        };
+        let transfer_ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: *deposit_token_program.key,
+            accounts: vec![
+                anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.user_token_account.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new(deposit_vault.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(ctx.accounts.user.key(), true),
+            ],
+            data: {
+                let mut d = vec![3u8];
+                d.extend_from_slice(&amount.to_le_bytes());
+                d
+            },
+        };
+        anchor_lang::solana_program::program::invoke(
+            &transfer_ix,
+            &[
+                ctx.accounts.user_token_account.to_account_info(),
+                deposit_vault.to_account_info(),
+                ctx.accounts.user.to_account_info(),
+                deposit_token_program.to_account_info(),
+            ],
         )?;
 
-        // Vault PDA signs Meteora CPIs
         let meteora_pos_key = ctx.accounts.meteora_position.key();
         let vault_seeds: &[&[u8]] = &[
             b"vault",
@@ -163,51 +172,60 @@ pub mod bin_farm {
         ];
         let signer = &[vault_seeds];
 
-        // 1. Initialize Meteora position (vault PDA = owner)
-        initialize_position(
+        let bin_array_lower = ctx.accounts.bin_array_lower.to_account_info();
+        let bin_array_upper = ctx.accounts.bin_array_upper.to_account_info();
+        let event_authority = ctx.accounts.event_authority.to_account_info();
+        let dlmm_program = ctx.accounts.dlmm_program.to_account_info();
+        let token_x_mint = ctx.accounts.token_x_mint.to_account_info();
+        let token_y_mint = ctx.accounts.token_y_mint.to_account_info();
+
+        initialize_position2(
             &[
                 ctx.accounts.user.to_account_info(),
                 ctx.accounts.meteora_position.to_account_info(),
                 ctx.accounts.lb_pair.to_account_info(),
                 ctx.accounts.vault.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                event_authority.clone(),
+                dlmm_program.clone(),
             ],
             min_bin_id,
             width,
             signer,
         )?;
 
-        // 2. Add one-sided liquidity
-        let liquidity_params = LiquidityParameterByStrategyOneSide {
-            amount,
-            active_id: min_bin_id,
+        let (amount_x, amount_y) = if side == Side::Sell { (amount, 0u64) } else { (0u64, amount) };
+        let liquidity_params = LiquidityParameterByStrategy {
+            amount_x,
+            amount_y,
+            active_id,
             max_active_bin_slippage,
-            strategy_parameters: StrategyParameters::spot_one_side(min_bin_id, max_bin_id),
+            strategy_parameters: StrategyParameters::spot_imbalanced(min_bin_id, max_bin_id),
         };
 
-        add_liquidity_by_strategy_one_side(
+        add_liquidity_by_strategy2(
             &[
                 ctx.accounts.meteora_position.to_account_info(),
                 ctx.accounts.lb_pair.to_account_info(),
                 ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                ctx.accounts.vault_token_account.to_account_info(),
-                ctx.accounts.reserve.to_account_info(),
-                ctx.accounts.token_mint.to_account_info(),
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                token_x_mint,
+                token_y_mint,
                 ctx.accounts.vault.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                event_authority,
+                dlmm_program,
             ],
             liquidity_params,
+            RemainingAccountsInfo::empty_hooks(),
             signer,
+            &[bin_array_lower, bin_array_upper],
         )?;
 
-        // Store position metadata
         let position = &mut ctx.accounts.position;
         position.owner = ctx.accounts.user.key();
         position.lb_pair = ctx.accounts.lb_pair.key();
@@ -220,7 +238,6 @@ pub mod bin_farm {
         position.created_at = Clock::get()?.unix_timestamp;
         position.bump = ctx.bumps.position;
 
-        // Initialize vault fields (bump used for PDA signing in harvest/close)
         let vault = &mut ctx.accounts.vault;
         vault.position = ctx.accounts.meteora_position.key();
         vault.bump = ctx.bumps.vault;
@@ -241,180 +258,6 @@ pub mod bin_farm {
         });
 
         msg!("Position opened: {} | {} bins [{},{}] | {} lamports",
-            ctx.accounts.position.key(), width, min_bin_id, max_bin_id, amount);
-        Ok(())
-    }
-
-    /// Open position with Token-2022 support.
-    /// Uses unchecked token_program account (validated via constraint) instead of
-    /// Program<'info, Token> which only accepts standard SPL Token.
-    /// Enables Token-2022 deposits from frontend.
-    pub fn open_position_v2<'info>(
-        ctx: Context<'_, '_, 'info, 'info, OpenPositionV2<'info>>,
-        amount: u64,
-        min_bin_id: i32,
-        max_bin_id: i32,
-        side: Side,
-        max_active_bin_slippage: i32,
-    ) -> Result<()> {
-        require!(!ctx.accounts.config.paused, CoreError::Paused);
-        require!(amount > 0, CoreError::ZeroAmount);
-        require!(amount >= MIN_POSITION_AMOUNT, CoreError::PositionTooSmall);
-        require!(max_active_bin_slippage >= 0 && max_active_bin_slippage <= 20, CoreError::InvalidSlippage);
-        require!(min_bin_id <= max_bin_id, CoreError::InvalidBinRange);
-        let width = max_bin_id - min_bin_id + 1;
-        require!(width <= MAX_POSITION_WIDTH, CoreError::PositionTooWide);
-
-        // Derive side from on-chain active_id — never trust caller
-        let active_id = {
-            let data = ctx.accounts.lb_pair.try_borrow_data()?;
-            require!(data.len() >= 80, CoreError::InvalidPool);
-            i32::from_le_bytes(data[76..80].try_into().map_err(|_| CoreError::Overflow)?)
-        };
-        require!(active_id > -443636 && active_id < 443636, CoreError::InvalidBinRange);
-        let side = if min_bin_id > active_id { Side::Sell } else { Side::Buy };
-
-        // Determine deposit token program based on side
-        let deposit_token_program = if side == Side::Sell {
-            &ctx.accounts.token_x_program
-        } else {
-            &ctx.accounts.token_y_program
-        };
-
-        // Transfer deposit to vault (Token-2022 compatible via raw invoke)
-        let deposit_vault = if side == Side::Sell {
-            &ctx.accounts.vault_token_x
-        } else {
-            &ctx.accounts.vault_token_y
-        };
-        let transfer_ix = anchor_lang::solana_program::instruction::Instruction {
-            program_id: *deposit_token_program.key,
-            accounts: vec![
-                anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.user_token_account.key(), false),
-                anchor_lang::solana_program::instruction::AccountMeta::new(deposit_vault.key(), false),
-                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(ctx.accounts.user.key(), true),
-            ],
-            data: {
-                let mut d = vec![3u8]; // SPL Token transfer discriminator
-                d.extend_from_slice(&amount.to_le_bytes());
-                d
-            },
-        };
-        anchor_lang::solana_program::program::invoke(
-            &transfer_ix,
-            &[
-                ctx.accounts.user_token_account.to_account_info(),
-                deposit_vault.to_account_info(),
-                ctx.accounts.user.to_account_info(),
-                deposit_token_program.to_account_info(),
-            ],
-        )?;
-
-        // Vault PDA signs Meteora CPIs
-        let meteora_pos_key = ctx.accounts.meteora_position.key();
-        let vault_seeds: &[&[u8]] = &[
-            b"vault",
-            meteora_pos_key.as_ref(),
-            &[ctx.bumps.vault],
-        ];
-        let signer = &[vault_seeds];
-
-        // Overflow accounts via remaining_accounts (BPF 4KB stack frame limit)
-        // [0] bin_array_lower, [1] bin_array_upper, [2] event_authority,
-        // [3] dlmm_program, [4] token_x_mint, [5] token_y_mint
-        require!(ctx.remaining_accounts.len() >= 6, CoreError::NoBinsProvided);
-        let bin_array_lower = ctx.remaining_accounts[0].to_account_info();
-        let bin_array_upper = ctx.remaining_accounts[1].to_account_info();
-        let event_authority = ctx.remaining_accounts[2].to_account_info();
-        let dlmm_program = ctx.remaining_accounts[3].to_account_info();
-        require!(dlmm_program.key() == METEORA_DLMM_PROGRAM_ID, CoreError::InvalidProgram);
-        let token_x_mint = ctx.remaining_accounts[4].to_account_info();
-        let token_y_mint = ctx.remaining_accounts[5].to_account_info();
-
-        // 1. Initialize Meteora position (vault PDA = owner)
-        initialize_position(
-            &[
-                ctx.accounts.user.to_account_info(),
-                ctx.accounts.meteora_position.to_account_info(),
-                ctx.accounts.lb_pair.to_account_info(),
-                ctx.accounts.vault.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-                event_authority.to_account_info(),
-                dlmm_program.to_account_info(),
-            ],
-            min_bin_id,
-            width,
-            signer,
-        )?;
-
-        // 2. Add liquidity via V2 CPI (Token-2022 compatible, two-sided params)
-        // active_id must be the pool's actual active bin (for slippage validation), not min_bin_id
-        let (amount_x, amount_y) = if side == Side::Sell { (amount, 0u64) } else { (0u64, amount) };
-        let liquidity_params = LiquidityParameterByStrategy {
-            amount_x,
-            amount_y,
-            active_id,
-            max_active_bin_slippage,
-            strategy_parameters: StrategyParameters::spot_imbalanced(min_bin_id, max_bin_id),
-        };
-
-        add_liquidity_by_strategy2(
-            &[
-                ctx.accounts.meteora_position.to_account_info(),
-                ctx.accounts.lb_pair.to_account_info(),
-                ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                ctx.accounts.vault_token_x.to_account_info(),
-                ctx.accounts.vault_token_y.to_account_info(),
-                ctx.accounts.reserve_x.to_account_info(),
-                ctx.accounts.reserve_y.to_account_info(),
-                token_x_mint.to_account_info(),
-                token_y_mint.to_account_info(),
-                ctx.accounts.vault.to_account_info(),
-                ctx.accounts.token_x_program.to_account_info(),
-                ctx.accounts.token_y_program.to_account_info(),
-                event_authority.to_account_info(),
-                dlmm_program.to_account_info(),
-            ],
-            liquidity_params,
-            RemainingAccountsInfo::empty_hooks(),
-            signer,
-            &[bin_array_lower, bin_array_upper],
-        )?;
-
-        // Store position metadata
-        let position = &mut ctx.accounts.position;
-        position.owner = ctx.accounts.user.key();
-        position.lb_pair = ctx.accounts.lb_pair.key();
-        position.meteora_position = ctx.accounts.meteora_position.key();
-        position.side = side;
-        position.min_bin_id = min_bin_id;
-        position.max_bin_id = max_bin_id;
-        position.initial_amount = amount;
-        position.harvested_amount = 0;
-        position.created_at = Clock::get()?.unix_timestamp;
-        position.bump = ctx.bumps.position;
-
-        let vault = &mut ctx.accounts.vault;
-        vault.position = ctx.accounts.meteora_position.key();
-        vault.bump = ctx.bumps.vault;
-
-        let config = &mut ctx.accounts.config;
-        config.total_positions = config.total_positions.saturating_add(1);
-        config.total_volume = config.total_volume.saturating_add(amount);
-
-        emit!(PositionOpenedEvent {
-            position: ctx.accounts.position.key(),
-            user: ctx.accounts.user.key(),
-            lb_pair: ctx.accounts.lb_pair.key(),
-            side,
-            amount,
-            min_bin_id,
-            max_bin_id,
-            timestamp: Clock::get()?.unix_timestamp,
-        });
-
-        msg!("Position opened (v2): {} | {} bins [{},{}] | {} lamports",
             ctx.accounts.position.key(), width, min_bin_id, max_bin_id, amount);
         Ok(())
     }
@@ -477,73 +320,39 @@ pub mod bin_farm {
             require!(slots_since > ctx.accounts.config.priority_slots, CoreError::BotNotStale);
         }
 
-        // CPI: remove liquidity from specified bins (100% each)
-        // V1/V2 branch: see doc above uses_token_2022()
-        let v2 = uses_token_2022(&ctx.accounts.token_x_mint.to_account_info())
-            || uses_token_2022(&ctx.accounts.token_y_mint.to_account_info());
-
-        // Snapshot vault balances BEFORE CPI. Fee calculation
-        // must use the delta (post - pre), not the total balance. Prevents charging
-        // fees on residual tokens from prior partial operations.
+        // Snapshot vault balances BEFORE CPI for delta-based fee calculation
         let x_before = ctx.accounts.vault_token_x.amount;
         let y_before = ctx.accounts.vault_token_y.amount;
 
-        if v2 {
-            let remaining = &[
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
-            ];
-            remove_liquidity_by_range2(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.memo_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                from_bin,
-                to_bin,
-                10_000,
-                RemainingAccountsInfo::none(),
-                signer,
-                remaining,
-            )?;
-        } else {
-            remove_liquidity_by_range(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                from_bin,
-                to_bin,
-                10_000,
-                signer,
-            )?;
-        }
+        let remaining = &[
+            ctx.accounts.bin_array_lower.to_account_info(),
+            ctx.accounts.bin_array_upper.to_account_info(),
+        ];
+        remove_liquidity_by_range2(
+            &[
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.lb_pair.to_account_info(),
+                ctx.accounts.bin_array_bitmap_ext.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                ctx.accounts.memo_program.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            from_bin,
+            to_bin,
+            10_000,
+            RemainingAccountsInfo::none(),
+            signer,
+            remaining,
+        )?;
 
         // Reload balances after CPI — use delta for fee calculation
         ctx.accounts.vault_token_x.reload()?;
@@ -794,143 +603,77 @@ pub mod bin_farm {
         ];
         let signer = &[vault_seeds];
 
-        // V1/V2 branch: see doc above uses_token_2022()
-        let v2 = uses_token_2022(&ctx.accounts.token_x_mint.to_account_info())
-            || uses_token_2022(&ctx.accounts.token_y_mint.to_account_info());
-
         // 1. Remove ALL remaining liquidity
-        if v2 {
-            let remaining = &[
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
-            ];
-            remove_liquidity_by_range2(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.memo_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                min_bin_id,
-                max_bin_id,
-                10_000,
-                RemainingAccountsInfo::none(),
-                signer,
-                remaining,
-            )?;
-        } else {
-            remove_all_liquidity(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        }
+        let remaining = &[
+            ctx.accounts.bin_array_lower.to_account_info(),
+            ctx.accounts.bin_array_upper.to_account_info(),
+        ];
+        remove_liquidity_by_range2(
+            &[
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.lb_pair.to_account_info(),
+                ctx.accounts.bin_array_bitmap_ext.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                ctx.accounts.memo_program.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            min_bin_id,
+            max_bin_id,
+            10_000,
+            RemainingAccountsInfo::none(),
+            signer,
+            remaining,
+        )?;
 
         // 2. Claim accrued trading fees
-        if v2 {
-            let remaining = &[
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
-            ];
-            claim_fee2(
-                &[
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.memo_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                min_bin_id,
-                max_bin_id,
-                RemainingAccountsInfo::none(),
-                signer,
-                remaining,
-            )?;
-        } else {
-            claim_fee(
-                &[
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.token_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        }
+        let remaining = &[
+            ctx.accounts.bin_array_lower.to_account_info(),
+            ctx.accounts.bin_array_upper.to_account_info(),
+        ];
+        claim_fee2(
+            &[
+                ctx.accounts.lb_pair.to_account_info(),
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                ctx.accounts.memo_program.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            min_bin_id,
+            max_bin_id,
+            RemainingAccountsInfo::none(),
+            signer,
+            remaining,
+        )?;
 
         // 3. Close Meteora position (rent -> bot)
-        if v2 {
-            close_position2(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.bot.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        } else {
-            close_position_cpi(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.bot.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        }
+        close_position2(
+            &[
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.bot.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            signer,
+        )?;
 
         let position_key = ctx.accounts.position.key();
         let owner_key = ctx.accounts.owner.key();
@@ -984,143 +727,77 @@ pub mod bin_farm {
         ];
         let signer = &[vault_seeds];
 
-        // V1/V2 branch: see doc above uses_token_2022()
-        let v2 = uses_token_2022(&ctx.accounts.token_x_mint.to_account_info())
-            || uses_token_2022(&ctx.accounts.token_y_mint.to_account_info());
-
         // 1. Remove all liquidity
-        if v2 {
-            let remaining = &[
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
-            ];
-            remove_liquidity_by_range2(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.memo_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                min_bin_id,
-                max_bin_id,
-                10_000,
-                RemainingAccountsInfo::none(),
-                signer,
-                remaining,
-            )?;
-        } else {
-            remove_all_liquidity(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        }
+        let remaining = &[
+            ctx.accounts.bin_array_lower.to_account_info(),
+            ctx.accounts.bin_array_upper.to_account_info(),
+        ];
+        remove_liquidity_by_range2(
+            &[
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.lb_pair.to_account_info(),
+                ctx.accounts.bin_array_bitmap_ext.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                ctx.accounts.memo_program.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            min_bin_id,
+            max_bin_id,
+            10_000,
+            RemainingAccountsInfo::none(),
+            signer,
+            remaining,
+        )?;
 
         // 2. Claim fees
-        if v2 {
-            let remaining = &[
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
-            ];
-            claim_fee2(
-                &[
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.memo_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                min_bin_id,
-                max_bin_id,
-                RemainingAccountsInfo::none(),
-                signer,
-                remaining,
-            )?;
-        } else {
-            claim_fee(
-                &[
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.token_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        }
+        let remaining = &[
+            ctx.accounts.bin_array_lower.to_account_info(),
+            ctx.accounts.bin_array_upper.to_account_info(),
+        ];
+        claim_fee2(
+            &[
+                ctx.accounts.lb_pair.to_account_info(),
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                ctx.accounts.memo_program.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            min_bin_id,
+            max_bin_id,
+            RemainingAccountsInfo::none(),
+            signer,
+            remaining,
+        )?;
 
         // 3. Close Meteora position (rent -> user)
-        if v2 {
-            close_position2(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.user.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        } else {
-            close_position_cpi(
-                &[
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.user.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        }
+        close_position2(
+            &[
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.user.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            signer,
+        )?;
 
         let position_key = ctx.accounts.position.key();
         let user_key = ctx.accounts.user.key();
@@ -1177,59 +854,33 @@ pub mod bin_farm {
         ];
         let signer = &[vault_seeds];
 
-        // V1/V2 branch: see doc above uses_token_2022()
-        let v2 = uses_token_2022(&ctx.accounts.token_x_mint.to_account_info())
-            || uses_token_2022(&ctx.accounts.token_y_mint.to_account_info());
-
-        if v2 {
-            let remaining = &[
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
-            ];
-            claim_fee2(
-                &[
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.token_x_program.to_account_info(),
-                    ctx.accounts.token_y_program.to_account_info(),
-                    ctx.accounts.memo_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                min_bin_id,
-                max_bin_id,
-                RemainingAccountsInfo::none(),
-                signer,
-                remaining,
-            )?;
-        } else {
-            claim_fee(
-                &[
-                    ctx.accounts.lb_pair.to_account_info(),
-                    ctx.accounts.meteora_position.to_account_info(),
-                    ctx.accounts.bin_array_lower.to_account_info(),
-                    ctx.accounts.bin_array_upper.to_account_info(),
-                    ctx.accounts.vault.to_account_info(),
-                    ctx.accounts.reserve_x.to_account_info(),
-                    ctx.accounts.reserve_y.to_account_info(),
-                    ctx.accounts.vault_token_x.to_account_info(),
-                    ctx.accounts.vault_token_y.to_account_info(),
-                    ctx.accounts.token_x_mint.to_account_info(),
-                    ctx.accounts.token_y_mint.to_account_info(),
-                    ctx.accounts.token_program.to_account_info(),
-                    ctx.accounts.event_authority.to_account_info(),
-                    ctx.accounts.dlmm_program.to_account_info(),
-                ],
-                signer,
-            )?;
-        }
+        let remaining = &[
+            ctx.accounts.bin_array_lower.to_account_info(),
+            ctx.accounts.bin_array_upper.to_account_info(),
+        ];
+        claim_fee2(
+            &[
+                ctx.accounts.lb_pair.to_account_info(),
+                ctx.accounts.meteora_position.to_account_info(),
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                ctx.accounts.memo_program.to_account_info(),
+                ctx.accounts.event_authority.to_account_info(),
+                ctx.accounts.dlmm_program.to_account_info(),
+            ],
+            min_bin_id,
+            max_bin_id,
+            RemainingAccountsInfo::none(),
+            signer,
+            remaining,
+        )?;
 
         // Transfer claimed fees directly to user (no protocol fee on LP fees)
         // Use token_x_program for X, token_y_program for Y (Token-2022 support)
@@ -1562,8 +1213,8 @@ pub mod bin_farm {
     /// Range is hardcoded to 2x current price (or MAX_POSITION_WIDTH bins, whichever
     /// is smaller). The depositor only chooses how many tokens to put in.
     /// Bins are placed from active_id+1 upward (sell side, above current price).
-    pub fn open_rover_position(
-        ctx: Context<OpenRoverPosition>,
+    pub fn open_rover_position<'info>(
+        ctx: Context<'_, '_, 'info, 'info, OpenRoverPosition<'info>>,
         amount: u64,
         bin_step: u16,
     ) -> Result<()> {
@@ -1571,6 +1222,20 @@ pub mod bin_farm {
         require!(amount > 0, CoreError::ZeroAmount);
         require!(amount >= MIN_ROVER_DEPOSIT, CoreError::RoverDepositTooSmall);
         require!(bin_step >= MIN_ROVER_BIN_STEP, CoreError::RoverBinStepTooSmall);
+
+        // Validate token account owners
+        {
+            let data = ctx.accounts.depositor_token_account.try_borrow_data()?;
+            require!(data.len() >= 64, CoreError::InvalidTokenOwner);
+            let owner = Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)?;
+            require!(owner == ctx.accounts.depositor.key(), CoreError::InvalidTokenOwner);
+        }
+        {
+            let data = ctx.accounts.vault_token_x.try_borrow_data()?;
+            require!(data.len() >= 64, CoreError::InvalidTokenOwner);
+            let owner = Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)?;
+            require!(owner == ctx.accounts.vault.key(), CoreError::InvalidTokenOwner);
+        }
 
         // C1: Read active_id from on-chain lb_pair — never trust the caller
         let active_id = {
@@ -1581,6 +1246,12 @@ pub mod bin_farm {
         };
         require!(active_id > -443636 && active_id < 443636, CoreError::InvalidBinRange);
 
+        // Overflow accounts: event_authority, dlmm_program
+        require!(ctx.remaining_accounts.len() >= 2, CoreError::NoBinsProvided);
+        let event_authority = ctx.remaining_accounts[0].to_account_info();
+        let dlmm_program = ctx.remaining_accounts[1].to_account_info();
+        require!(dlmm_program.key() == METEORA_DLMM_PROGRAM_ID, CoreError::InvalidProgram);
+
         // Compute 2x range: ln(2)/ln(1+binStep/10000) ≈ 6931/binStep bins
         // Capped at MAX_POSITION_WIDTH (70 bins)
         let bins_for_2x = 6931_i32 / (bin_step as i32);
@@ -1590,17 +1261,30 @@ pub mod bin_farm {
         let max_active_bin_slippage = 10; // hardcoded for rovers
 
         // Transfer deposit tokens from caller to vault
-        transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.depositor_token_account.to_account_info(),
-                    to: ctx.accounts.vault_token_account.to_account_info(),
-                    authority: ctx.accounts.depositor.to_account_info(),
+        {
+            let transfer_ix = anchor_lang::solana_program::instruction::Instruction {
+                program_id: *ctx.accounts.token_x_program.key,
+                accounts: vec![
+                    anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.depositor_token_account.key(), false),
+                    anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.vault_token_x.key(), false),
+                    anchor_lang::solana_program::instruction::AccountMeta::new_readonly(ctx.accounts.depositor.key(), true),
+                ],
+                data: {
+                    let mut d = vec![3u8];
+                    d.extend_from_slice(&amount.to_le_bytes());
+                    d
                 },
-            ),
-            amount,
-        )?;
+            };
+            anchor_lang::solana_program::program::invoke(
+                &transfer_ix,
+                &[
+                    ctx.accounts.depositor_token_account.to_account_info(),
+                    ctx.accounts.vault_token_x.to_account_info(),
+                    ctx.accounts.depositor.to_account_info(),
+                    ctx.accounts.token_x_program.to_account_info(),
+                ],
+            )?;
+        }
 
         // Vault PDA signs Meteora CPIs
         let meteora_pos_key = ctx.accounts.meteora_position.key();
@@ -1612,48 +1296,52 @@ pub mod bin_farm {
         let signer = &[vault_seeds];
 
         // Initialize Meteora position (vault PDA = owner)
-        initialize_position(
+        initialize_position2(
             &[
                 ctx.accounts.depositor.to_account_info(),
                 ctx.accounts.meteora_position.to_account_info(),
                 ctx.accounts.lb_pair.to_account_info(),
                 ctx.accounts.vault.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                event_authority.clone(),
+                dlmm_program.clone(),
             ],
             min_bin_id,
             width,
             signer,
         )?;
 
-        // Add one-sided SELL liquidity with BidAsk distribution
-        // (more tokens at higher bins — sells at better prices as token pumps)
-        let liquidity_params = LiquidityParameterByStrategyOneSide {
-            amount,
-            active_id: min_bin_id,
+        // Add sell-side liquidity with BidAsk distribution via V2 two-sided CPI
+        // (amount_y = 0 makes it effectively one-sided)
+        let liquidity_params = LiquidityParameterByStrategy {
+            amount_x: amount,
+            amount_y: 0,
+            active_id,
             max_active_bin_slippage,
-            strategy_parameters: StrategyParameters::bid_ask_one_side(min_bin_id, max_bin_id),
+            strategy_parameters: StrategyParameters::bid_ask_imbalanced(min_bin_id, max_bin_id),
         };
 
-        add_liquidity_by_strategy_one_side(
+        add_liquidity_by_strategy2(
             &[
                 ctx.accounts.meteora_position.to_account_info(),
                 ctx.accounts.lb_pair.to_account_info(),
                 ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                ctx.accounts.vault_token_account.to_account_info(),
-                ctx.accounts.reserve.to_account_info(),
-                ctx.accounts.token_mint.to_account_info(),
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
                 ctx.accounts.vault.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                event_authority,
+                dlmm_program,
             ],
             liquidity_params,
+            RemainingAccountsInfo::empty_hooks(),
             signer,
+            &[ctx.accounts.bin_array_lower.to_account_info(), ctx.accounts.bin_array_upper.to_account_info()],
         )?;
 
         // Capture keys before mutable borrows
@@ -1692,7 +1380,7 @@ pub mod bin_farm {
             depositor: depositor_key,
             lb_pair: lb_pair_key,
             position: position_key,
-            token_mint: ctx.accounts.token_mint.key(),
+            token_mint: ctx.accounts.token_x_mint.key(),
             amount,
             active_id,
             bin_step,
@@ -1762,13 +1450,21 @@ pub mod bin_farm {
     /// Open a fee rover position from accumulated token fees in rover_authority ATA.
     /// Bot-gated. Uses BidAskOneSide distribution (more tokens at higher bins).
     /// Bot pays rent for Position + Vault PDAs (refunded on close).
-    pub fn open_fee_rover(
-        ctx: Context<OpenFeeRover>,
+    pub fn open_fee_rover<'info>(
+        ctx: Context<'_, '_, 'info, 'info, OpenFeeRover<'info>>,
         amount: u64,
         bin_step: u16,
     ) -> Result<()> {
         require!(amount > 0, CoreError::ZeroAmount);
         require!(bin_step >= MIN_ROVER_BIN_STEP, CoreError::RoverBinStepTooSmall);
+
+        // Validate vault_token_x owner
+        {
+            let data = ctx.accounts.vault_token_x.try_borrow_data()?;
+            require!(data.len() >= 64, CoreError::InvalidTokenOwner);
+            let owner = Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)?;
+            require!(owner == ctx.accounts.vault.key(), CoreError::InvalidTokenOwner);
+        }
 
         // C1: Read active_id from on-chain lb_pair — never trust the caller
         let active_id = {
@@ -1778,6 +1474,12 @@ pub mod bin_farm {
             i32::from_le_bytes(data[76..80].try_into().map_err(|_| CoreError::Overflow)?)
         };
         require!(active_id > -443636 && active_id < 443636, CoreError::InvalidBinRange);
+
+        // Overflow accounts: event_authority, dlmm_program
+        require!(ctx.remaining_accounts.len() >= 2, CoreError::NoBinsProvided);
+        let event_authority = ctx.remaining_accounts[0].to_account_info();
+        let dlmm_program = ctx.remaining_accounts[1].to_account_info();
+        require!(dlmm_program.key() == METEORA_DLMM_PROGRAM_ID, CoreError::InvalidProgram);
 
         // Same range as external rovers: active_id+1 to +70 max
         let min_bin_id = active_id.checked_add(1).ok_or(CoreError::Overflow)?;
@@ -1790,18 +1492,31 @@ pub mod bin_farm {
         let rover_signer_seeds: &[&[u8]] = &[b"rover_authority", &[ctx.accounts.rover_authority.bump]];
         let rover_signer = &[rover_signer_seeds];
 
-        transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.rover_token_account.to_account_info(),
-                    to: ctx.accounts.vault_token_account.to_account_info(),
-                    authority: ctx.accounts.rover_authority.to_account_info(),
+        {
+            let transfer_ix = anchor_lang::solana_program::instruction::Instruction {
+                program_id: *ctx.accounts.token_x_program.key,
+                accounts: vec![
+                    anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.rover_token_account.key(), false),
+                    anchor_lang::solana_program::instruction::AccountMeta::new(ctx.accounts.vault_token_x.key(), false),
+                    anchor_lang::solana_program::instruction::AccountMeta::new_readonly(ctx.accounts.rover_authority.key(), true),
+                ],
+                data: {
+                    let mut d = vec![3u8];
+                    d.extend_from_slice(&amount.to_le_bytes());
+                    d
                 },
+            };
+            anchor_lang::solana_program::program::invoke_signed(
+                &transfer_ix,
+                &[
+                    ctx.accounts.rover_token_account.to_account_info(),
+                    ctx.accounts.vault_token_x.to_account_info(),
+                    ctx.accounts.rover_authority.to_account_info(),
+                    ctx.accounts.token_x_program.to_account_info(),
+                ],
                 rover_signer,
-            ),
-            amount,
-        )?;
+            )?;
+        }
 
         // Vault PDA signs Meteora CPIs
         let meteora_pos_key = ctx.accounts.meteora_position.key();
@@ -1813,47 +1528,51 @@ pub mod bin_farm {
         let signer = &[vault_seeds];
 
         // Initialize Meteora position (vault PDA = owner)
-        initialize_position(
+        initialize_position2(
             &[
                 ctx.accounts.bot.to_account_info(),
                 ctx.accounts.meteora_position.to_account_info(),
                 ctx.accounts.lb_pair.to_account_info(),
                 ctx.accounts.vault.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                event_authority.clone(),
+                dlmm_program.clone(),
             ],
             min_bin_id,
             width,
             signer,
         )?;
 
-        // Add one-sided SELL liquidity with BidAsk distribution
-        let liquidity_params = LiquidityParameterByStrategyOneSide {
-            amount,
-            active_id: min_bin_id,
+        // Add sell-side liquidity with BidAsk distribution via V2 two-sided CPI
+        let liquidity_params = LiquidityParameterByStrategy {
+            amount_x: amount,
+            amount_y: 0,
+            active_id,
             max_active_bin_slippage,
-            strategy_parameters: StrategyParameters::bid_ask_one_side(min_bin_id, max_bin_id),
+            strategy_parameters: StrategyParameters::bid_ask_imbalanced(min_bin_id, max_bin_id),
         };
 
-        add_liquidity_by_strategy_one_side(
+        add_liquidity_by_strategy2(
             &[
                 ctx.accounts.meteora_position.to_account_info(),
                 ctx.accounts.lb_pair.to_account_info(),
                 ctx.accounts.bin_array_bitmap_ext.to_account_info(),
-                ctx.accounts.vault_token_account.to_account_info(),
-                ctx.accounts.reserve.to_account_info(),
-                ctx.accounts.token_mint.to_account_info(),
-                ctx.accounts.bin_array_lower.to_account_info(),
-                ctx.accounts.bin_array_upper.to_account_info(),
+                ctx.accounts.vault_token_x.to_account_info(),
+                ctx.accounts.vault_token_y.to_account_info(),
+                ctx.accounts.reserve_x.to_account_info(),
+                ctx.accounts.reserve_y.to_account_info(),
+                ctx.accounts.token_x_mint.to_account_info(),
+                ctx.accounts.token_y_mint.to_account_info(),
                 ctx.accounts.vault.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.event_authority.to_account_info(),
-                ctx.accounts.dlmm_program.to_account_info(),
+                ctx.accounts.token_x_program.to_account_info(),
+                ctx.accounts.token_y_program.to_account_info(),
+                event_authority,
+                dlmm_program,
             ],
             liquidity_params,
+            RemainingAccountsInfo::empty_hooks(),
             signer,
+            &[ctx.accounts.bin_array_lower.to_account_info(), ctx.accounts.bin_array_upper.to_account_info()],
         )?;
 
         // Store position metadata — owner is rover_authority, side is always Sell
@@ -1889,7 +1608,7 @@ pub mod bin_farm {
             depositor: ctx.accounts.bot.key(),
             lb_pair: lb_pair_key,
             position: position_key,
-            token_mint: ctx.accounts.token_mint.key(),
+            token_mint: ctx.accounts.token_x_mint.key(),
             amount,
             active_id,
             bin_step,
@@ -2041,14 +1760,6 @@ pub mod bin_farm {
         msg!("DAMM v2 pool fees claimed to rover_authority");
         Ok(())
     }
-}
-
-// Wrapper to avoid name collision with Anchor's close constraint
-fn close_position_cpi<'info>(
-    accounts: &[AccountInfo<'info>; 8],
-    signer_seeds: &[&[&[u8]]],
-) -> Result<()> {
-    meteora_dlmm_cpi::close_position(accounts, signer_seeds)
 }
 
 /// Prepend a memo CPI before token transfers. Satisfies the Memo Transfer extension
@@ -2371,94 +2082,7 @@ pub struct Initialize<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-#[instruction(amount: u64, min_bin_id: i32, max_bin_id: i32, side: Side)]
-pub struct OpenPosition<'info> {
-    #[account(mut)]
-    pub user: Signer<'info>,
-
-    #[account(mut, seeds = [b"config"], bump = config.bump)]
-    pub config: Box<Account<'info, Config>>,
-
-    // --- Meteora accounts ---
-
-    /// CHECK: Validated by Meteora CPI
-    #[account(mut)]
-    pub lb_pair: AccountInfo<'info>,
-
-    /// New position keypair (frontend generates)
-    #[account(mut)]
-    pub meteora_position: Signer<'info>,
-
-    /// CHECK: Bitmap extension (pass DLMM program ID if none). Not enforced mut — writable only when real account exists.
-    pub bin_array_bitmap_ext: AccountInfo<'info>,
-
-    /// CHECK: Pool reserve for deposit token
-    #[account(mut)]
-    pub reserve: AccountInfo<'info>,
-
-    /// CHECK: Bin array lower
-    #[account(mut)]
-    pub bin_array_lower: AccountInfo<'info>,
-
-    /// CHECK: Bin array upper
-    #[account(mut)]
-    pub bin_array_upper: AccountInfo<'info>,
-
-    /// CHECK: Meteora event authority PDA
-    pub event_authority: AccountInfo<'info>,
-
-    /// CHECK: Meteora DLMM program
-    #[account(constraint = dlmm_program.key() == METEORA_DLMM_PROGRAM_ID @ CoreError::InvalidProgram)]
-    pub dlmm_program: AccountInfo<'info>,
-
-    // --- monke.army accounts ---
-
-    #[account(
-        init,
-        payer = user,
-        space = Position::SIZE,
-        seeds = [b"position", meteora_position.key().as_ref()],
-        bump
-    )]
-    pub position: Box<Account<'info, Position>>,
-
-    /// Vault PDA: one per position (NOT per pool)
-    #[account(
-        init,
-        payer = user,
-        space = Vault::SIZE,
-        seeds = [b"vault", meteora_position.key().as_ref()],
-        bump
-    )]
-    pub vault: Box<Account<'info, Vault>>,
-
-    #[account(
-        mut,
-        constraint = user_token_account.owner == user.key() @ CoreError::InvalidTokenOwner,
-        constraint = user_token_account.mint == token_mint.key() @ CoreError::InvalidTokenOwner
-    )]
-    pub user_token_account: Box<Account<'info, TokenAccount>>,
-    #[account(
-        mut,
-        constraint = vault_token_account.owner == vault.key() @ CoreError::InvalidTokenOwner,
-        constraint = vault_token_account.mint == token_mint.key() @ CoreError::InvalidTokenOwner
-    )]
-    pub vault_token_account: Box<Account<'info, TokenAccount>>,
-
-    pub token_mint: Box<Account<'info, Mint>>,
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub system_program: Program<'info, System>,
-
-    /// CHECK: Rent sysvar (Meteora initialize_position v1 requires it)
-    #[account(address = sysvar::rent::ID)]
-    pub rent: AccountInfo<'info>,
-}
-
-/// Token-2022 compatible open_position.
-/// Uses add_liquidity_by_strategy2 (V2 CPI) which takes both token programs.
-/// Accounts expanded to include both sides (X/Y) for V2 Meteora CPI compatibility.
+/// Token-2022 compatible open_position. All CPI via V2 variants.
 #[derive(Accounts)]
 #[instruction(amount: u64, min_bin_id: i32, max_bin_id: i32, side: Side)]
 pub struct OpenPositionV2<'info> {
@@ -2468,13 +2092,10 @@ pub struct OpenPositionV2<'info> {
     #[account(mut, seeds = [b"config"], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
 
-    // --- Meteora accounts ---
-
     /// CHECK: Validated by Meteora CPI
     #[account(mut)]
     pub lb_pair: AccountInfo<'info>,
 
-    /// New position keypair (frontend generates)
     #[account(mut)]
     pub meteora_position: Signer<'info>,
 
@@ -2489,11 +2110,6 @@ pub struct OpenPositionV2<'info> {
     #[account(mut)]
     pub reserve_y: AccountInfo<'info>,
 
-    // bin_array_lower, bin_array_upper, event_authority, and dlmm_program
-    // passed via ctx.remaining_accounts (BPF 4KB frame limit)
-
-    // --- monke.army accounts ---
-
     #[account(
         init,
         payer = user,
@@ -2503,7 +2119,6 @@ pub struct OpenPositionV2<'info> {
     )]
     pub position: Box<Account<'info, Position>>,
 
-    /// Vault PDA: one per position (NOT per pool)
     #[account(
         init,
         payer = user,
@@ -2513,38 +2128,17 @@ pub struct OpenPositionV2<'info> {
     )]
     pub vault: Box<Account<'info, Vault>>,
 
-    /// CHECK: User's deposit token account (Token-2022 compatible).
-    #[account(
-        mut,
-        constraint = {
-            let data = user_token_account.try_borrow_data()?;
-            data.len() >= 64 && Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)? == user.key()
-        } @ CoreError::InvalidTokenOwner
-    )]
+    /// CHECK: User's deposit token account (Token-2022 compatible). Validated in handler.
+    #[account(mut)]
     pub user_token_account: AccountInfo<'info>,
 
-    /// CHECK: Vault's token X account. Owner must be vault PDA.
-    #[account(
-        mut,
-        constraint = {
-            let data = vault_token_x.try_borrow_data()?;
-            data.len() >= 64 && Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)? == vault.key()
-        } @ CoreError::InvalidTokenOwner
-    )]
+    /// CHECK: Vault's token X account. Validated in handler.
+    #[account(mut)]
     pub vault_token_x: AccountInfo<'info>,
 
-    /// CHECK: Vault's token Y account. Owner must be vault PDA.
-    #[account(
-        mut,
-        constraint = {
-            let data = vault_token_y.try_borrow_data()?;
-            data.len() >= 64 && Pubkey::try_from(&data[32..64]).map_err(|_| CoreError::InvalidTokenOwner)? == vault.key()
-        } @ CoreError::InvalidTokenOwner
-    )]
+    /// CHECK: Vault's token Y account. Validated in handler.
+    #[account(mut)]
     pub vault_token_y: AccountInfo<'info>,
-
-    // token_x_mint and token_y_mint passed via ctx.remaining_accounts[4] and [5]
-    // (Token-2022 mints are owned by Token-2022 program, not compatible with Account<Mint>)
 
     /// CHECK: Token X program — SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
@@ -2554,14 +2148,27 @@ pub struct OpenPositionV2<'info> {
     #[account(constraint = *token_y_program.key == anchor_spl::token::ID || *token_y_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
     pub token_y_program: AccountInfo<'info>,
 
-    // memo_program passed via ctx.remaining_accounts[2] (reduces stack footprint)
-
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 
-    /// CHECK: Rent sysvar (Meteora initialize_position v1 requires it)
-    #[account(address = sysvar::rent::ID)]
-    pub rent: AccountInfo<'info>,
+    /// CHECK: Bin array lower — Meteora validates via CPI
+    #[account(mut)]
+    pub bin_array_lower: UncheckedAccount<'info>,
+
+    /// CHECK: Bin array upper — Meteora validates via CPI
+    #[account(mut)]
+    pub bin_array_upper: UncheckedAccount<'info>,
+
+    /// CHECK: Meteora event authority — validated by Meteora CPI
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Meteora DLMM program — validated in handler body
+    pub dlmm_program: UncheckedAccount<'info>,
+
+    /// CHECK: Token X mint — passed through to Meteora CPI
+    pub token_x_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Token Y mint — passed through to Meteora CPI
+    pub token_y_mint: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -2659,7 +2266,6 @@ pub struct ClosePosition<'info> {
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
     pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
     pub token_x_program: AccountInfo<'info>,
@@ -2868,7 +2474,6 @@ pub struct UserClose<'info> {
     #[account(mut, constraint = rover_fee_token_y.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
     pub rover_fee_token_y: Box<Account<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
     pub token_x_program: AccountInfo<'info>,
@@ -2951,7 +2556,6 @@ pub struct ClaimFees<'info> {
     #[account(mut, constraint = user_token_y.owner == user.key() @ CoreError::InvalidTokenOwner)]
     pub user_token_y: Box<Account<'info, TokenAccount>>,
 
-    pub token_program: Program<'info, Token>,
     /// CHECK: Token X program — must be SPL Token or Token-2022
     #[account(constraint = *token_x_program.key == anchor_spl::token::ID || *token_x_program.key == TOKEN_2022_PROGRAM_ID @ CoreError::InvalidProgram)]
     pub token_x_program: AccountInfo<'info>,
@@ -3108,9 +2712,13 @@ pub struct OpenRoverPosition<'info> {
     /// CHECK: Bitmap extension — writable only when real account exists
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
-    /// CHECK: Pool reserve for deposit token
+    /// CHECK: Pool reserve X
     #[account(mut)]
-    pub reserve: AccountInfo<'info>,
+    pub reserve_x: AccountInfo<'info>,
+
+    /// CHECK: Pool reserve Y
+    #[account(mut)]
+    pub reserve_y: AccountInfo<'info>,
 
     /// CHECK: Bin array lower
     #[account(mut)]
@@ -3119,13 +2727,6 @@ pub struct OpenRoverPosition<'info> {
     /// CHECK: Bin array upper
     #[account(mut)]
     pub bin_array_upper: AccountInfo<'info>,
-
-    /// CHECK: Meteora event authority PDA
-    pub event_authority: AccountInfo<'info>,
-
-    /// CHECK: Meteora DLMM program
-    #[account(constraint = dlmm_program.key() == METEORA_DLMM_PROGRAM_ID @ CoreError::InvalidProgram)]
-    pub dlmm_program: AccountInfo<'info>,
 
     // --- monke.army accounts ---
 
@@ -3147,26 +2748,34 @@ pub struct OpenRoverPosition<'info> {
     )]
     pub vault: Box<Account<'info, Vault>>,
 
-    #[account(
-        mut,
-        constraint = depositor_token_account.owner == depositor.key() @ CoreError::InvalidTokenOwner
-    )]
-    pub depositor_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Depositor's token account. Validated in handler.
+    #[account(mut)]
+    pub depositor_token_account: AccountInfo<'info>,
 
-    #[account(
-        mut,
-        constraint = vault_token_account.owner == vault.key() @ CoreError::InvalidTokenOwner
-    )]
-    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Vault token X account. Validated in handler.
+    #[account(mut)]
+    pub vault_token_x: AccountInfo<'info>,
 
-    pub token_mint: Box<Account<'info, Mint>>,
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
+    /// CHECK: Vault token Y account. Validated in handler.
+    #[account(mut)]
+    pub vault_token_y: AccountInfo<'info>,
+
+    /// CHECK: Token X mint
+    pub token_x_mint: AccountInfo<'info>,
+
+    /// CHECK: Token Y mint
+    pub token_y_mint: AccountInfo<'info>,
+
+    /// CHECK: Token X program — SPL Token or Token-2022
+    pub token_x_program: AccountInfo<'info>,
+
+    /// CHECK: Token Y program — SPL Token or Token-2022
+    pub token_y_program: AccountInfo<'info>,
+
     pub system_program: Program<'info, System>,
 
-    /// CHECK: Rent sysvar (Meteora initialize_position v1 requires it)
-    #[account(address = sysvar::rent::ID)]
-    pub rent: AccountInfo<'info>,
+    // event_authority, dlmm_program, memo_program passed via remaining_accounts
+    // to fit within BPF 4KB stack frame with 2 init accounts
 }
 
 #[derive(Accounts)]
@@ -3280,9 +2889,13 @@ pub struct OpenFeeRover<'info> {
     /// CHECK: Bitmap extension — writable only when real account exists
     pub bin_array_bitmap_ext: AccountInfo<'info>,
 
-    /// CHECK: Pool reserve for deposit token
+    /// CHECK: Pool reserve X
     #[account(mut)]
-    pub reserve: AccountInfo<'info>,
+    pub reserve_x: AccountInfo<'info>,
+
+    /// CHECK: Pool reserve Y
+    #[account(mut)]
+    pub reserve_y: AccountInfo<'info>,
 
     /// CHECK: Bin array lower
     #[account(mut)]
@@ -3291,13 +2904,6 @@ pub struct OpenFeeRover<'info> {
     /// CHECK: Bin array upper
     #[account(mut)]
     pub bin_array_upper: AccountInfo<'info>,
-
-    /// CHECK: Meteora event authority PDA
-    pub event_authority: AccountInfo<'info>,
-
-    /// CHECK: Meteora DLMM program
-    #[account(constraint = dlmm_program.key() == METEORA_DLMM_PROGRAM_ID @ CoreError::InvalidProgram)]
-    pub dlmm_program: AccountInfo<'info>,
 
     // --- monke.army accounts ---
 
@@ -3311,18 +2917,30 @@ pub struct OpenFeeRover<'info> {
     #[account(mut, constraint = rover_token_account.owner == rover_authority.key() @ CoreError::InvalidTokenOwner)]
     pub rover_token_account: Box<Account<'info, TokenAccount>>,
 
-    /// Destination: per-position vault token account
-    #[account(mut, constraint = vault_token_account.owner == vault.key() @ CoreError::InvalidTokenOwner)]
-    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Vault token X account. Validated in handler.
+    #[account(mut)]
+    pub vault_token_x: AccountInfo<'info>,
 
-    pub token_mint: Box<Account<'info, Mint>>,
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
+    /// CHECK: Vault token Y account. Validated in handler.
+    #[account(mut)]
+    pub vault_token_y: AccountInfo<'info>,
+
+    /// CHECK: Token X mint
+    pub token_x_mint: AccountInfo<'info>,
+
+    /// CHECK: Token Y mint
+    pub token_y_mint: AccountInfo<'info>,
+
+    /// CHECK: Token X program — SPL Token or Token-2022
+    pub token_x_program: AccountInfo<'info>,
+
+    /// CHECK: Token Y program — SPL Token or Token-2022
+    pub token_y_program: AccountInfo<'info>,
+
     pub system_program: Program<'info, System>,
 
-    /// CHECK: Rent sysvar (Meteora initialize_position v1 requires it)
-    #[account(address = sysvar::rent::ID)]
-    pub rent: AccountInfo<'info>,
+    // event_authority, dlmm_program, memo_program passed via remaining_accounts
+    // to fit within BPF 4KB stack frame with 2 init accounts
 }
 
 /// Claim trading fees from a DAMM v2 pool position held by rover_authority.

@@ -53,7 +53,7 @@ pub const MIN_DEPOSIT_LAMPORTS: u64 = 10_000_000;
 pub const BANANAS_PER_FEED: u64 = 1_000_000_000_000; // 1M tokens with 6 decimals
 
 /// Metaplex Token Metadata program ID (mainnet)
-pub const MPL_TOKEN_METADATA_ID: Pubkey = solana_program::pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+pub const MPL_TOKEN_METADATA_ID: Pubkey = anchor_lang::solana_program::pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 /// Offset into Metaplex metadata account data where the Collection field lives.
 /// Metaplex metadata v1.1+ layout (after header):
