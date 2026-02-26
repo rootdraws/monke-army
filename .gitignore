@@ -30,3 +30,9 @@ Thumbs.db
 # Build output
 dist/
 build/
+
+# AI session context
+claude.md
+
+# Reference SDKs (cloned, not ours)
+ref/

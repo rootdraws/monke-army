@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data: https://*.helius-rpc.com https://arweave.net https://*.arweave.net https://*.nftstorage.link https://nftstorage.link https://ipfs.io https://*.ipfs.io https://shdw-drive.genesysgo.net https://*.shdw-drive.genesysgo.net https://*.cloudfront.net https://img-cdn.magiceden.dev https://*.magiceden.dev; connect-src 'self' https://*.solana.com https://*.helius-rpc.com https://public-api.birdeye.so https://lite-api.jup.ag https://quote-api.jup.ag https://unpkg.com wss://*.solana.com ws://localhost:* wss://*;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data: https://*.helius-rpc.com https://arweave.net https://*.arweave.net https://*.nftstorage.link https://nftstorage.link https://ipfs.io https://*.ipfs.io https://shdw-drive.genesysgo.net https://*.shdw-drive.genesysgo.net https://*.cloudfront.net https://img-cdn.magiceden.dev https://*.magiceden.dev https://gateway.irys.xyz https://*.irys.xyz https://*.bundlr.network https://*.pinata.cloud; connect-src 'self' https://*.solana.com https://*.helius-rpc.com https://public-api.birdeye.so https://lite-api.jup.ag https://quote-api.jup.ag https://unpkg.com wss://*.solana.com ws://localhost:* wss://*;">
   <title>monke.army</title>
   <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -201,7 +201,7 @@
           <span class="bin-viz-meta" id="binVizMeta"></span>
           <div class="bin-viz-zoom">
             <button class="zoom-btn" id="zoomOut">−</button>
-            <span class="zoom-level" id="zoomLevel">±40</span>
+            <span class="zoom-level" id="zoomLevel">±80</span>
             <button class="zoom-btn" id="zoomIn">+</button>
           </div>
         </div>
@@ -237,12 +237,12 @@
           <div class="range-section">
             <div class="range-row">
               <span class="range-label">from</span>
-              <input type="number" class="range-input" id="rangeNear" value="5" min="0.1" step="0.1">
+              <input type="number" class="range-input" id="rangeNear" value="1" min="0.1" step="0.1">
               <span class="range-suffix" id="rangeSuffix">% below</span>
             </div>
             <div class="range-row">
               <span class="range-label">to</span>
-              <input type="number" class="range-input" id="rangeFar" value="35" min="0.1" step="0.5">
+              <input type="number" class="range-input" id="rangeFar" value="5" min="0.1" step="0.5">
               <span class="range-suffix" id="rangeSuffixFar">% below</span>
             </div>
           </div>
@@ -298,7 +298,7 @@
           <div class="monke-split">
             <!-- LEFT: NFT selector -->
             <div class="monke-nft-panel">
-              <div class="stat-label" style="margin-bottom:12px;">your monkes</div>
+              <div class="stat-label" style="margin-bottom:12px;">monke.army</div>
               <div class="nft-carousel" id="nftCarousel">
                 <button class="carousel-arrow carousel-left" id="nftPrev" style="display:none;">&#9664;</button>
                 <div class="carousel-frame" id="nftFrame">
@@ -317,20 +317,31 @@
 
             <!-- RIGHT: Stats + actions -->
             <div class="monke-detail-panel">
-              <div class="stats-grid stats-grid-2">
-                <div><div class="stat-label">bananas balance</div><div class="stat-value bananas" id="bananasBalance">0</div></div>
-                <div><div class="stat-label">your weight</div><div class="stat-value" id="userTotalWeight">0</div></div>
-                <div><div class="stat-label">claimable</div><div class="stat-value green" id="userClaimable">0 SOL</div></div>
-                <div><div class="stat-label">total claimed</div><div class="stat-value" id="userTotalClaimed">0 SOL</div></div>
-                <div><div class="stat-label">total fees earned</div><div class="stat-value" id="userTotalFees">0 SOL</div></div>
-                <div><div class="stat-label">your share</div><div class="stat-value" id="userRewardShare">0%</div></div>
+              <div class="monke-top-triptych">
+                <div class="triptych-col">
+                  <div class="stat-label">bananas balance</div>
+                  <div class="stat-value bananas" id="bananasBalance">0</div>
+                  <div class="triptych-sub-stats">
+                    <div><span class="stat-label sub-label">claimable</span><span class="stat-value green sub-value" id="userClaimable">0.0000 SOL</span></div>
+                    <div><span class="stat-label sub-label">total claimed</span><span class="stat-value sub-value" id="userTotalClaimed">0.0000 SOL</span></div>
+                  </div>
+                </div>
+                <div class="triptych-col">
+                  <div class="stat-label">your weight</div>
+                  <div class="stat-value" id="userTotalWeight">0</div>
+                  <div class="triptych-sub-stats">
+                    <div><span class="stat-label sub-label">your share</span><span class="stat-value sub-value" id="userRewardShare">0%</span></div>
+                    <div><span class="stat-label sub-label">fees earned</span><span class="stat-value sub-value" id="userTotalFees">0.0000 SOL</span></div>
+                  </div>
+                </div>
+                <div class="triptych-col triptych-burn">
+                  <button class="burn-btn" id="feedMonkeBtn">
+                    <canvas id="burnFireCanvas" width="64" height="64"></canvas>
+                  </button>
+                </div>
               </div>
 
-              <div class="monke-actions-bar">
-                <button class="action-btn-sm" id="feedMonkeBtn">Burn 1M $BANANAS to your Monke.</button>
-              </div>
-
-              <div class="monke-header"><span>monke</span><span>gen</span><span>weight</span><span>claimable</span><span></span></div>
+              <div class="monke-header"><span></span><span>monke</span><span>gen</span><span>weight</span><span>claimable</span><span></span></div>
               <div id="monkeList"><div class="empty-state">connect wallet to view your monkes</div></div>
             </div>
           </div>
@@ -403,10 +414,8 @@
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════════════
-       PAGE 5: RECON — token intelligence / rover TVL leaderboard
-       ═══════════════════════════════════════════════════════════ -->
-  <div class="site-page" id="page-recon">
+  <!-- PAGE 5: RECON — hidden for now -->
+  <div class="site-page" id="page-recon" style="display:none !important;">
     <div class="page-body">
 
       <div class="stats-grid">
@@ -442,13 +451,11 @@
       <ellipse class="sigil-orbit" data-page="2" cx="100" cy="10" rx="77" ry="45" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
       <ellipse class="sigil-orbit" data-page="3" cx="100" cy="8" rx="66" ry="38" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
       <ellipse class="sigil-orbit" data-page="4" cx="100" cy="6" rx="54" ry="31" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <ellipse class="sigil-orbit" data-page="5" cx="100" cy="10" rx="40" ry="22" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
       <circle class="sigil-dot" data-page="0" cx="100" cy="67" r="2.5" fill="var(--faint)"/>
       <circle class="sigil-dot" data-page="1" cx="100" cy="61" r="2.5" fill="var(--faint)"/>
       <circle class="sigil-dot" data-page="2" cx="100" cy="55" r="2.5" fill="var(--faint)"/>
       <circle class="sigil-dot" data-page="3" cx="100" cy="46" r="2.5" fill="var(--faint)"/>
       <circle class="sigil-dot" data-page="4" cx="100" cy="37" r="2.5" fill="var(--faint)"/>
-      <circle class="sigil-dot" data-page="5" cx="100" cy="32" r="2.5" fill="var(--faint)"/>
       <circle cx="100" cy="10" r="4" fill="none" stroke="var(--scaffold)" stroke-width="1"/>
       <circle cx="100" cy="10" r="1.5" fill="var(--scaffold)"/>
       <line x1="100" y1="14" x2="100" y2="77" stroke="var(--scaffold)" stroke-width="0.75"/>

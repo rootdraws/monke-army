@@ -127,16 +127,24 @@ async function loadOnChainFeeBps() {
 
 let relayWs = null;
 let relayConnected = false;
+let relayRetries = 0;
+const RELAY_MAX_RETRIES = 3;
+const RELAY_BASE_DELAY = 5000;
 
 function connectRelay() {
   const url = CONFIG.BOT_RELAY_URL;
   if (!url) return;
+  if (relayRetries >= RELAY_MAX_RETRIES) {
+    if (CONFIG.DEBUG) console.log('[relay] Max retries reached — bot offline');
+    return;
+  }
 
   try {
     relayWs = new WebSocket(url + '/ws');
 
     relayWs.onopen = () => {
       relayConnected = true;
+      relayRetries = 0;
       if (CONFIG.DEBUG) console.log('[relay] Connected to bot relay');
       const statusEl = document.getElementById('opsBotStatus');
       if (statusEl) statusEl.textContent = 'connected';
@@ -144,10 +152,14 @@ function connectRelay() {
 
     relayWs.onclose = () => {
       relayConnected = false;
-      if (CONFIG.DEBUG) console.log('[relay] Disconnected — reconnecting in 5s');
       const statusEl = document.getElementById('opsBotStatus');
       if (statusEl) statusEl.textContent = 'offline';
-      setTimeout(connectRelay, 5000);
+      relayRetries++;
+      if (relayRetries < RELAY_MAX_RETRIES) {
+        const delay = RELAY_BASE_DELAY * Math.pow(2, relayRetries - 1);
+        if (CONFIG.DEBUG) console.log(`[relay] Reconnecting in ${delay / 1000}s (attempt ${relayRetries}/${RELAY_MAX_RETRIES})`);
+        setTimeout(connectRelay, delay);
+      }
     };
 
     relayWs.onerror = () => {
@@ -161,7 +173,10 @@ function connectRelay() {
       } catch {}
     };
   } catch {
-    setTimeout(connectRelay, 5000);
+    relayRetries++;
+    if (relayRetries < RELAY_MAX_RETRIES) {
+      setTimeout(connectRelay, RELAY_BASE_DELAY * Math.pow(2, relayRetries - 1));
+    }
   }
 }
 
@@ -170,7 +185,7 @@ function handleRelayEvent(msg) {
     case 'activeBinChanged':
       // Update price if we're watching this pool
       if (state.poolAddress && msg.data.lbPair === state.poolAddress) {
-        const newPrice = binToPrice(msg.data.newActiveId, state.binStep);
+        const newPrice = binToPrice(msg.data.newActiveId, state.binStep, state.tokenXDecimals, state.tokenYDecimals);
         state.currentPrice = newPrice;
         state.activeBin = msg.data.newActiveId;
         const priceEl = document.getElementById('currentPrice');
@@ -234,14 +249,16 @@ async function relayFetch(path) {
 // SDK INLINE — key functions from our fixed SDK files
 // ============================================================
 
-/** Bin <-> Price math (from bins.js) */
-function binToPrice(binId, binStep) {
-  return Math.pow(1 + binStep / 10000, binId);
+/** Bin <-> Price math (from bins.js). decimalsX/Y normalize atomic price to human-readable. */
+function binToPrice(binId, binStep, decimalsX = 0, decimalsY = 0) {
+  const raw = Math.pow(1 + binStep / 10000, binId);
+  return raw * Math.pow(10, decimalsX - decimalsY);
 }
 
-function priceToBin(price, binStep, roundDown = true) {
+function priceToBin(price, binStep, decimalsX = 0, decimalsY = 0, roundDown = true) {
   if (price <= 0) return NaN;
-  const binId = Math.log(price) / Math.log(1 + binStep / 10000);
+  const raw = price / Math.pow(10, decimalsX - decimalsY);
+  const binId = Math.log(raw) / Math.log(1 + binStep / 10000);
   return roundDown ? Math.floor(binId) : Math.ceil(binId);
 }
 
@@ -546,11 +563,14 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-/** Read mint decimals at runtime */
+/** Read mint decimals at runtime (works without wallet connection) */
 async function getMintDecimals(mintAddress) {
   try {
+    const conn = state.connection || new solanaWeb3.Connection(
+      CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL, 'confirmed'
+    );
     const pubkey = new solanaWeb3.PublicKey(mintAddress);
-    const info = await state.connection.getParsedAccountInfo(pubkey);
+    const info = await conn.getParsedAccountInfo(pubkey);
     return info.value?.data?.parsed?.info?.decimals ?? 9;
   } catch {
     return 9;
@@ -616,8 +636,8 @@ function getRangeBins() {
   const farPrice = percentToPrice(far, state.side);
   // For buy: far is lower price (more bins below), near is higher
   // For sell: near is lower price, far is higher
-  const minBin = priceToBin(Math.min(nearPrice, farPrice), state.binStep);
-  const maxBin = priceToBin(Math.max(nearPrice, farPrice), state.binStep, false);
+  const minBin = priceToBin(Math.min(nearPrice, farPrice), state.binStep, state.tokenXDecimals, state.tokenYDecimals);
+  const maxBin = priceToBin(Math.max(nearPrice, farPrice), state.binStep, state.tokenXDecimals, state.tokenYDecimals, false);
   return { minBin, maxBin };
 }
 
@@ -649,8 +669,8 @@ function updateSide(newSide) {
 
   const nearInput = document.getElementById('rangeNear');
   const farInput = document.getElementById('rangeFar');
-  if (nearInput) nearInput.value = newSide === 'buy' ? '5' : '5';
-  if (farInput) farInput.value = newSide === 'buy' ? '35' : '35';
+  if (nearInput) nearInput.value = newSide === 'buy' ? '1' : '1';
+  if (farInput) farInput.value = newSide === 'buy' ? '5' : '5';
 
   updateFee();
   updateBinStrip();
@@ -666,24 +686,23 @@ async function updateFee() {
   }
 
   try {
-    let balanceStr;
-    if (state.side === 'buy') {
-      const lamports = await state.connection.getBalance(state.publicKey);
-      balanceStr = (lamports / 1e9).toFixed(4) + ' ' + (state.tokenYSymbol || 'SOL');
-    } else if (state.tokenXMint) {
-      const mintPk = new solanaWeb3.PublicKey(state.tokenXMint);
-      const atas = await state.connection.getTokenAccountsByOwner(state.publicKey, { mint: mintPk });
-      let total = 0;
-      for (const { account } of atas.value) {
-        total += Number(account.data.readBigUInt64LE(64));
-      }
-      const symbol = state.tokenXSymbol || 'TOKEN';
-      balanceStr = (total / 1e9).toFixed(4) + ' ' + symbol;
+    const mint = state.side === 'buy' ? state.tokenYMint : state.tokenXMint;
+    const decimals = state.side === 'buy' ? state.tokenYDecimals : state.tokenXDecimals;
+    const symbol = state.side === 'buy' ? (state.tokenYSymbol || 'SOL') : (state.tokenXSymbol || 'TOKEN');
+    if (!mint) { el.textContent = `${CONFIG.FEE_BPS / 100}% on output`; return; }
+
+    let rawAmount;
+    if (mint === NATIVE_MINT.toBase58() || mint === 'So11111111111111111111111111111111111111112') {
+      rawAmount = await state.connection.getBalance(state.publicKey);
     } else {
-      el.textContent = `${CONFIG.FEE_BPS / 100}% on output`;
-      return;
+      const mintPk = new solanaWeb3.PublicKey(mint);
+      const atas = await state.connection.getTokenAccountsByOwner(state.publicKey, { mint: mintPk });
+      rawAmount = 0;
+      for (const { account } of atas.value) {
+        rawAmount += Number(account.data.readBigUInt64LE(64));
+      }
     }
-    el.textContent = `balance: ${balanceStr}`;
+    el.textContent = `balance: ${(rawAmount / Math.pow(10, decimals)).toFixed(4)} ${symbol}`;
   } catch {
     el.textContent = `${CONFIG.FEE_BPS / 100}% on output`;
   }
@@ -992,10 +1011,8 @@ async function loadPool() {
       state.poolAddress = addr;
       state.activeBin = relayData.activeId;
       state.binStep = relayData.binStep;
-      state.currentPrice = binToPrice(relayData.activeId, relayData.binStep);
       state.tokenXSymbol = relayData.tokenXSymbol || 'TOKEN';
       state.tokenYSymbol = relayData.tokenYSymbol || 'SOL';
-      // Relay may not carry mints — fill from on-chain if missing
       if (relayData.tokenXMint) {
         state.tokenXMint = relayData.tokenXMint;
         state.tokenYMint = relayData.tokenYMint;
@@ -1015,15 +1032,14 @@ async function loadPool() {
       state.poolAddress = addr;
       state.activeBin = pool.activeId;
       state.binStep = pool.binStep;
-      state.currentPrice = binToPrice(pool.activeId, pool.binStep);
       state.tokenXSymbol = symX;
       state.tokenYSymbol = symY;
       state.tokenXMint = pool.tokenXMint.toBase58();
       state.tokenYMint = pool.tokenYMint.toBase58();
     }
 
-    // Fetch decimals for deposit amount calculation
-    if (state.tokenXMint && state.connection) {
+    // Fetch decimals before price computation (needed for atomic → human normalization)
+    if (state.tokenXMint) {
       const [dX, dY] = await Promise.all([
         getMintDecimals(state.tokenXMint),
         getMintDecimals(state.tokenYMint),
@@ -1031,6 +1047,8 @@ async function loadPool() {
       state.tokenXDecimals = dX;
       state.tokenYDecimals = dY;
     }
+
+    state.currentPrice = binToPrice(state.activeBin, state.binStep, state.tokenXDecimals, state.tokenYDecimals);
 
     document.getElementById('poolName').textContent = `${state.tokenXSymbol}/${state.tokenYSymbol}`;
     document.getElementById('currentPrice').textContent = '$' + formatPrice(state.currentPrice);
@@ -1376,7 +1394,7 @@ const vizState = {
   previewBins: new Map(),
   activeBin: 0,
   binStep: 0,
-  visibleRange: 40,
+  visibleRange: 80,
 };
 
 function renderBinViz() {
@@ -1514,7 +1532,7 @@ function renderBinViz() {
     ctx.fillStyle = 'rgba(200, 210, 230, 0.8)';
     ctx.font = '300 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'right';
-    const priceLabel = '$' + formatPrice(binToPrice(activeBin, binStep));
+    const priceLabel = '$' + formatPrice(binToPrice(activeBin, binStep, state.tokenXDecimals, state.tokenYDecimals));
     ctx.fillText(priceLabel, xLabelWidth - 6, activeY + 3);
   }
 
@@ -1527,7 +1545,7 @@ function renderBinViz() {
     if (bin === activeBin) continue;
     const idx = bin - lowBin;
     const y = yMargin + barAreaH - (idx + 0.5) * rowH;
-    const price = binToPrice(bin, binStep);
+    const price = binToPrice(bin, binStep, state.tokenXDecimals, state.tokenYDecimals);
     ctx.fillText('$' + formatPrice(price), xLabelWidth - 6, y + 3);
   }
 
@@ -1685,7 +1703,12 @@ async function createPosition() {
       side: state.side === 'buy' ? Side.Buy : Side.Sell,
       maxActiveBinSlippage: slippage,
     });
-    tx.add(kitIxToWeb3(openIx));
+    const openWeb3Ix = kitIxToWeb3(openIx);
+    if (bitmapExtWritable) {
+      const bmIdx = openWeb3Ix.keys.findIndex(k => k.pubkey.equals(cpi.binArrayBitmapExt));
+      if (bmIdx >= 0) openWeb3Ix.keys[bmIdx].isWritable = true;
+    }
+    tx.add(openWeb3Ix);
 
     // Set tx metadata
     const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
@@ -1746,8 +1769,8 @@ async function refreshPositionsList() {
         side: p.side,
         minBin: p.minBinId,
         maxBin: p.maxBinId,
-        minPrice: binToPrice(p.minBinId, state.binStep),
-        maxPrice: binToPrice(p.maxBinId, state.binStep),
+        minPrice: binToPrice(p.minBinId, state.binStep, state.tokenXDecimals, state.tokenYDecimals),
+        maxPrice: binToPrice(p.maxBinId, state.binStep, state.tokenXDecimals, state.tokenYDecimals),
         filled: fillPct,
         amount: p.initialAmount / Math.pow(10, decimals),
         initialAmount: p.initialAmount,
@@ -1827,13 +1850,16 @@ async function closePosition(index) {
 
     const tx = new solanaWeb3.Transaction();
 
-    // Ensure user ATAs exist
-    const [userXInfo, userYInfo] = await Promise.all([
+    const [userXInfo, userYInfo, roverFeeXInfo, roverFeeYInfo] = await Promise.all([
       conn.getAccountInfo(userTokenX),
       conn.getAccountInfo(userTokenY),
+      conn.getAccountInfo(roverFeeTokenX),
+      conn.getAccountInfo(roverFeeTokenY),
     ]);
     if (!userXInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenX, user, cpi.tokenXMint, cpi.tokenXProgramId));
     if (!userYInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenY, user, cpi.tokenYMint, cpi.tokenYProgramId));
+    if (!roverFeeXInfo) tx.add(createAssociatedTokenAccountIx(user, roverFeeTokenX, roverAuthorityPDA, cpi.tokenXMint, cpi.tokenXProgramId));
+    if (!roverFeeYInfo) tx.add(createAssociatedTokenAccountIx(user, roverFeeTokenY, roverAuthorityPDA, cpi.tokenYMint, cpi.tokenYProgramId));
 
     const closeIx = await getUserCloseInstructionAsync({
       user: asSigner(user),
@@ -1860,16 +1886,28 @@ async function closePosition(index) {
       tokenYProgram: address(cpi.tokenYProgramId.toBase58()),
       memoProgram: address(SPL_MEMO_PROGRAM_ID.toBase58()),
     });
-    tx.add(kitIxToWeb3(closeIx));
+    const closeWeb3Ix = kitIxToWeb3(closeIx);
+    const bmExtWritable = !cpi.binArrayBitmapExt.equals(cpi.dlmmProgram);
+    if (bmExtWritable) {
+      const bmIdx = closeWeb3Ix.keys.findIndex(k => k.pubkey.equals(cpi.binArrayBitmapExt));
+      if (bmIdx >= 0) closeWeb3Ix.keys[bmIdx].isWritable = true;
+    }
+    tx.add(closeWeb3Ix);
 
     const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
     tx.recentBlockhash = blockhash;
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
+    const simResult = await conn.simulateTransaction(tx);
+    if (simResult.value.err) {
+      console.error('[monke] Close simulation failed:', simResult.value.err, simResult.value.logs);
+      throw new Error('Close simulation failed: ' + JSON.stringify(simResult.value.err));
+    }
+
     showToast('Approve in wallet...', 'info');
     const signed = await state.wallet.signTransaction(tx);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
     showToast('Confirming...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 
@@ -1906,9 +1944,16 @@ async function closePositionDirect(pos) {
   const roverFeeTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, roverAuthorityPDA, true, cpi.tokenYProgramId);
 
   const tx = new solanaWeb3.Transaction();
-  const [userXInfo, userYInfo] = await Promise.all([conn.getAccountInfo(userTokenX), conn.getAccountInfo(userTokenY)]);
+  const [userXInfo, userYInfo, roverFeeXInfo, roverFeeYInfo] = await Promise.all([
+    conn.getAccountInfo(userTokenX),
+    conn.getAccountInfo(userTokenY),
+    conn.getAccountInfo(roverFeeTokenX),
+    conn.getAccountInfo(roverFeeTokenY),
+  ]);
   if (!userXInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenX, user, cpi.tokenXMint, cpi.tokenXProgramId));
   if (!userYInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenY, user, cpi.tokenYMint, cpi.tokenYProgramId));
+  if (!roverFeeXInfo) tx.add(createAssociatedTokenAccountIx(user, roverFeeTokenX, roverAuthorityPDA, cpi.tokenXMint, cpi.tokenXProgramId));
+  if (!roverFeeYInfo) tx.add(createAssociatedTokenAccountIx(user, roverFeeTokenY, roverAuthorityPDA, cpi.tokenYMint, cpi.tokenYProgramId));
 
   const closeIx = await getUserCloseInstructionAsync({
     user: asSigner(user),
@@ -1935,16 +1980,28 @@ async function closePositionDirect(pos) {
     tokenYProgram: address(cpi.tokenYProgramId.toBase58()),
     memoProgram: address(SPL_MEMO_PROGRAM_ID.toBase58()),
   });
-  tx.add(kitIxToWeb3(closeIx));
+  const ucWeb3Ix = kitIxToWeb3(closeIx);
+  const ucBmWritable = !cpi.binArrayBitmapExt.equals(cpi.dlmmProgram);
+  if (ucBmWritable) {
+    const bmIdx = ucWeb3Ix.keys.findIndex(k => k.pubkey.equals(cpi.binArrayBitmapExt));
+    if (bmIdx >= 0) ucWeb3Ix.keys[bmIdx].isWritable = true;
+  }
+  tx.add(ucWeb3Ix);
 
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
   tx.recentBlockhash = blockhash;
   tx.lastValidBlockHeight = lastValidBlockHeight;
   tx.feePayer = user;
 
+  const simResult = await conn.simulateTransaction(tx);
+  if (simResult.value.err) {
+    console.error('[monke] Close simulation failed:', simResult.value.err, simResult.value.logs);
+    throw new Error('Close simulation failed: ' + JSON.stringify(simResult.value.err));
+  }
+
   showToast('Approve in wallet...', 'info');
   const signed = await state.wallet.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
   showToast('Confirming...', 'info');
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
   if (CONFIG.DEBUG) console.log(`[monke] Close tx: ${sig}`);
@@ -2011,6 +2068,117 @@ async function claimFeesDirect(pos) {
 // RANK PAGE — Monke + Roster (stub — wired to live data in later phase)
 // ============================================================
 
+let burnFireRAF = null;
+function initBurnFireCanvas() {
+  const canvas = document.getElementById('burnFireCanvas');
+  if (!canvas) return;
+  const S = 4;
+  const W = 16, H = 16;
+  const CW = W * S, CH = H * S;
+  canvas.width = CW; canvas.height = CH;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  const pal = [
+    [6, 4, 18],
+    [30, 10, 60], [60, 18, 100], [100, 30, 140],
+    [160, 60, 180], [200, 100, 190], [220, 160, 120],
+    [242, 214, 98], [255, 240, 180], [255, 255, 240],
+  ];
+
+  const fire = new Float32Array(W * H);
+  const stars = [];
+  let t = 0, last = 0;
+
+  function step(ts) {
+    if (ts - last < 70) { burnFireRAF = requestAnimationFrame(step); return; }
+    last = ts; t++;
+
+    const sway = Math.sin(t * 0.05) * 0.5;
+
+    for (let x = 0; x < W; x++) {
+      const cx = (x - W / 2) / (W / 2);
+      const shape = Math.max(0, 1 - cx * cx * 1.2);
+      const flicker = Math.sin(t * 0.25 + x * 1.3) * 0.4;
+      fire[(H - 1) * W + x] = Math.random() < shape * 0.9
+        ? 6.5 + Math.random() * 3 + flicker
+        : shape * 2 * Math.random();
+    }
+
+    for (let y = 0; y < H - 1; y++) {
+      for (let x = 0; x < W; x++) {
+        const srcVal = fire[(y + 1) * W + x];
+        if (srcVal < 0.2) { fire[y * W + x] *= 0.4; continue; }
+
+        let drift = 0;
+        if (Math.random() < 0.4) drift = Math.random() < 0.5 ? -1 : 1;
+        if (Math.random() < 0.2) drift += sway > 0 ? 1 : -1;
+        const dx = Math.min(W - 1, Math.max(0, x + drift));
+
+        const ny = y / H;
+        const taper = 1 - ny;
+        const decay = 0.25 + ny * 0.25 + Math.random() * 0.1;
+        const turb = Math.sin(t * 0.3 + x * 1.5 + y * 0.8) * 0.08;
+        fire[y * W + dx] = Math.max(0, srcVal - decay + turb) * (0.85 + taper * 0.15);
+      }
+    }
+
+    if (Math.random() < 0.5) {
+      const sx = 4 + Math.floor(Math.random() * (W - 8));
+      stars.push({
+        x: sx, y: H - 2,
+        vx: (Math.random() - 0.5) * 0.3 + sway * 0.15,
+        vy: -(0.3 + Math.random() * 0.5),
+        life: 8 + Math.random() * 14,
+        phase: Math.random() * 6.28,
+      });
+    }
+    for (let i = stars.length - 1; i >= 0; i--) {
+      const s = stars[i];
+      s.x += s.vx; s.y += s.vy;
+      s.vy -= 0.01; s.vx += sway * 0.005;
+      s.life--;
+      if (s.life <= 0 || s.x < 0 || s.x >= W || s.y < 0) { stars.splice(i, 1); continue; }
+      const px = Math.floor(s.x), py = Math.floor(s.y);
+      if (py >= 0 && py < H && px >= 0 && px < W) {
+        const twinkle = Math.sin(t * 0.8 + s.phase) * 0.5 + 0.5;
+        fire[py * W + px] = Math.max(fire[py * W + px], 7 + twinkle * 2.5);
+      }
+    }
+
+    const img = ctx.createImageData(CW, CH);
+    for (let gy = 0; gy < H; gy++) {
+      for (let gx = 0; gx < W; gx++) {
+        const v = fire[gy * W + gx];
+        let r, g, b, a;
+        if (v < 0.15) { r = 0; g = 0; b = 0; a = 0; }
+        else {
+          const scaled = v * ((pal.length - 1) / 9);
+          const ci = Math.min(Math.floor(scaled), pal.length - 2);
+          const frac = scaled - ci;
+          const c0 = pal[ci], c1 = pal[Math.min(ci + 1, pal.length - 1)];
+          r = c0[0] + (c1[0] - c0[0]) * frac;
+          g = c0[1] + (c1[1] - c0[1]) * frac;
+          b = c0[2] + (c1[2] - c0[2]) * frac;
+          a = v > 0.5 ? 255 : v * (255 / 0.5);
+        }
+        for (let py = 0; py < S; py++) {
+          for (let px = 0; px < S; px++) {
+            const off = ((gy * S + py) * CW + (gx * S + px)) * 4;
+            img.data[off] = r; img.data[off + 1] = g;
+            img.data[off + 2] = b; img.data[off + 3] = a;
+          }
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    burnFireRAF = requestAnimationFrame(step);
+  }
+
+  if (burnFireRAF) cancelAnimationFrame(burnFireRAF);
+  burnFireRAF = requestAnimationFrame(step);
+}
+
 function renderCarouselFrame(nfts, idx) {
   const frame = document.getElementById('nftFrame');
   const counter = document.getElementById('nftCounter');
@@ -2022,7 +2190,7 @@ function renderCarouselFrame(nfts, idx) {
   const weightLabel = nft.weight > 0 ? `wt: ${nft.weight}` : '';
   const claimLabel = nft.pendingSol > 0n ? `${(Number(nft.pendingSol) / 1e9).toFixed(4)} SOL` : '';
   frame.innerHTML = `
-    <img src="${escapeHtml(nft.image || '')}" alt="${escapeHtml(nft.name || 'monke')}" loading="lazy" onerror="this.style.display='none'">
+    <img src="${escapeHtml(nft.image || '')}" alt="${escapeHtml(nft.name || 'monke')}" loading="eager" fetchpriority="high" decoding="async" onerror="this.style.display='none'">
     <span class="nft-gen-tag ${nft.gen === 2 ? 'gen2' : 'gen3'}">${nft.gen === 2 ? 'g2' : 'g3'}</span>
     ${weightLabel || claimLabel ? `<span class="nft-burn-info">${weightLabel}${weightLabel && claimLabel ? ' · ' : ''}${claimLabel}</span>` : ''}`;
 
@@ -2051,6 +2219,7 @@ async function enrichNftsWithBurnData(nfts) {
         if (burn) {
           nft.weight = Number(burn.shareWeight);
           nft.pendingSol = monkeState ? computePendingClaim(burn, monkeState) : 0n;
+          nft.claimedSol = burn.claimedSol;
           nft.claimable = (Number(nft.pendingSol) / 1e9).toFixed(4);
           nft.hasBurn = true;
           return;
@@ -2058,11 +2227,47 @@ async function enrichNftsWithBurnData(nfts) {
       }
       nft.weight = 0;
       nft.pendingSol = 0n;
+      nft.claimedSol = 0n;
       nft.claimable = '0';
       nft.hasBurn = false;
     });
   } catch (err) {
     console.warn('[monke] MonkeBurn fetch failed:', err.message);
+  }
+}
+
+async function updateUserMonkeStats(nfts) {
+  const el = id => document.getElementById(id);
+  const totalWeight = nfts.reduce((s, n) => s + (n.weight || 0), 0);
+  const totalPending = nfts.reduce((s, n) => s + Number(n.pendingSol || 0n), 0);
+  const totalClaimed = nfts.reduce((s, n) => s + Number(n.claimedSol || 0n), 0);
+
+  if (el('userTotalWeight')) el('userTotalWeight').textContent = totalWeight.toLocaleString();
+  if (el('userClaimable')) el('userClaimable').textContent = (totalPending / 1e9).toFixed(4) + ' SOL';
+  if (el('userTotalClaimed')) el('userTotalClaimed').textContent = (totalClaimed / 1e9).toFixed(4) + ' SOL';
+
+  const globalWeight = state.monkeStateData ? Number(state.monkeStateData.totalShareWeight) : 0;
+  if (el('userRewardShare')) el('userRewardShare').textContent = globalWeight > 0 ? (totalWeight / globalWeight * 100).toFixed(2) + '%' : '0%';
+
+  const totalFees = totalPending + totalClaimed;
+  if (el('userTotalFees')) el('userTotalFees').textContent = (totalFees / 1e9).toFixed(4) + ' SOL';
+
+  if (state.connected && state.publicKey) {
+    try {
+      const conn = state.connection || new solanaWeb3.Connection(CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL, 'confirmed');
+      const bananasMint = new solanaWeb3.PublicKey(CONFIG.BANANAS_MINT);
+      const userBananasAta = getAssociatedTokenAddressSync(bananasMint, state.publicKey);
+      const ataInfo = await conn.getAccountInfo(userBananasAta);
+      if (ataInfo) {
+        const data = new Uint8Array(ataInfo.data);
+        const amount = new DataView(data.buffer, data.byteOffset).getBigUint64(64, true);
+        if (el('bananasBalance')) el('bananasBalance').textContent = (Number(amount) / 1e6).toLocaleString();
+      } else {
+        if (el('bananasBalance')) el('bananasBalance').textContent = '0';
+      }
+    } catch (err) {
+      console.warn('[monke] Bananas balance fetch failed:', err.message);
+    }
   }
 }
 
@@ -2124,18 +2329,33 @@ async function renderMonkeList() {
 
   // Populate list (right panel)
   container.innerHTML = nfts.map((nft, i) => `
-    <div class="monke-row">
+    <div class="monke-row${i === 0 ? ' selected' : ''}" data-mint="${escapeHtml(nft.mint)}" data-idx="${i}">
+      <span class="row-chevron">&#9654;</span>
       <span>${escapeHtml(nft.name || nft.mint.slice(0, 8) + '...')}</span>
       <span class="gen-badge ${nft.gen === 2 ? 'gen2' : 'gen3'}">gen${nft.gen}</span>
       <span>${nft.weight || 0}</span>
       <span class="claimable">${nft.claimable || '0'} SOL</span>
-      <button class="action-btn-sm" data-mint="${escapeHtml(nft.mint)}" data-action="claim">claim</button>
+      <button class="action-btn-sm" data-mint="${escapeHtml(nft.mint)}" data-action="claim" ${nft.hasBurn && nft.pendingSol > 0n ? '' : 'disabled style="opacity:0.25;cursor:default;"'}>claim</button>
     </div>
   `).join('');
+
+  container.querySelectorAll('.monke-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="claim"]')) return;
+      const idx = parseInt(row.dataset.idx, 10);
+      state.nftCarouselIdx = idx;
+      renderCarouselFrame(nfts, idx);
+      highlightMonkeRow(row.dataset.mint);
+    });
+  });
 
   container.querySelectorAll('[data-action="claim"]').forEach(btn => {
     btn.addEventListener('click', () => handleClaimMonke(btn.dataset.mint));
   });
+
+  updateUserMonkeStats(nfts);
+  initBurnFireCanvas();
+  highlightMonkeRow(nfts[0]?.mint);
 }
 
 function selectMonke(nft) {
@@ -2146,6 +2366,15 @@ function selectMonke(nft) {
   if (nameEl) nameEl.textContent = nft.name || nft.mint.slice(0, 12) + '...';
   if (genEl) genEl.textContent = 'gen' + nft.gen + (nft.gen === 2 ? ' (2x weight)' : ' (1x weight)');
   state.selectedMonkeMint = nft.mint;
+  highlightMonkeRow(nft.mint);
+}
+
+function highlightMonkeRow(mint) {
+  const container = document.getElementById('monkeList');
+  if (!container) return;
+  container.querySelectorAll('.monke-row').forEach(row => {
+    row.classList.toggle('selected', row.dataset.mint === mint);
+  });
 }
 
 async function fetchSMBNfts() {
@@ -2167,6 +2396,7 @@ async function fetchSMBNfts() {
     });
     const data = await resp.json();
     const items = data?.result?.items || [];
+    if (CONFIG.DEBUG) console.log('[monke] DAS assets:', items.length, items.map(i => ({ id: i.id, links: i.content?.links, files: i.content?.files, json_uri: i.content?.json_uri })));
 
     const gen2Collection = CONFIG.SMB_COLLECTION;
     const gen3Collection = CONFIG.SMB_GEN3_COLLECTION;
@@ -2179,14 +2409,39 @@ async function fetchSMBNfts() {
       else if (collection === gen3Collection) gen = 3;
       if (gen === 0) continue;
 
+      let image = item.content?.links?.image || '';
+      if (!image) {
+        const files = item.content?.files || [];
+        for (const f of files) {
+          const candidate = f.cdn_uri || f.uri || '';
+          if (candidate && (candidate.endsWith('.png') || candidate.endsWith('.jpg') || candidate.endsWith('.gif') || candidate.endsWith('.webp') || candidate.includes('image'))) {
+            image = candidate; break;
+          }
+        }
+        if (!image && files.length > 0) image = files[0].cdn_uri || files[0].uri || '';
+      }
+
       monkes.push({
         mint: item.id,
         name: item.content?.metadata?.name || '',
-        image: item.content?.links?.image || item.content?.files?.[0]?.uri || '',
+        image,
+        json_uri: item.content?.json_uri || '',
         gen,
         weight: 0,
         claimable: '0',
       });
+    }
+
+    // Resolve missing images from off-chain JSON metadata
+    const needsResolve = monkes.filter(m => !m.image && m.json_uri);
+    if (needsResolve.length > 0) {
+      await Promise.allSettled(needsResolve.map(async m => {
+        try {
+          const r = await fetch(m.json_uri);
+          const meta = await r.json();
+          m.image = meta.image || meta.properties?.files?.[0]?.uri || '';
+        } catch {}
+      }));
     }
 
     return monkes;
@@ -2307,6 +2562,10 @@ async function handleFeedMonke(nftMintStr) {
 
 async function handleClaimMonke(nftMintStr) {
   if (!state.connected) { showToast('Connect wallet first', 'error'); return; }
+  const nftData = (state.monkeNfts || []).find(n => n.mint === nftMintStr);
+  if (!nftData || !nftData.hasBurn || nftData.pendingSol <= 0n) {
+    showToast('Nothing to claim for this monke', 'info'); return;
+  }
   const conn = state.connection;
   const user = state.publicKey;
   const nftMint = new solanaWeb3.PublicKey(nftMintStr);
@@ -2612,6 +2871,18 @@ async function handleHarvestPosition(positionPDAStr, lbPairStr, ownerStr, side) 
   const roverFeeTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, roverAuthorityPDA, true, cpi.tokenYProgramId);
 
   const tx = new solanaWeb3.Transaction();
+
+  const [ownerXInfo, ownerYInfo, roverFeeXInfo, roverFeeYInfo] = await Promise.all([
+    conn.getAccountInfo(ownerTokenX),
+    conn.getAccountInfo(ownerTokenY),
+    conn.getAccountInfo(roverFeeTokenX),
+    conn.getAccountInfo(roverFeeTokenY),
+  ]);
+  if (!ownerXInfo) tx.add(createAssociatedTokenAccountIx(user, ownerTokenX, owner, cpi.tokenXMint, cpi.tokenXProgramId));
+  if (!ownerYInfo) tx.add(createAssociatedTokenAccountIx(user, ownerTokenY, owner, cpi.tokenYMint, cpi.tokenYProgramId));
+  if (!roverFeeXInfo) tx.add(createAssociatedTokenAccountIx(user, roverFeeTokenX, roverAuthorityPDA, cpi.tokenXMint, cpi.tokenXProgramId));
+  if (!roverFeeYInfo) tx.add(createAssociatedTokenAccountIx(user, roverFeeTokenY, roverAuthorityPDA, cpi.tokenYMint, cpi.tokenYProgramId));
+
   const harvestIx = await getHarvestBinsInstructionAsync({
     bot: asSigner(user),
     position: address(positionPubkey.toBase58()),
@@ -2639,14 +2910,26 @@ async function handleHarvestPosition(positionPDAStr, lbPairStr, ownerStr, side) 
     memoProgram: address(SPL_MEMO_PROGRAM_ID.toBase58()),
     binIds: binIds,
   });
-  tx.add(kitIxToWeb3(harvestIx));
+  const harvestWeb3Ix = kitIxToWeb3(harvestIx);
+  const hvBmWritable = !cpi.binArrayBitmapExt.equals(cpi.dlmmProgram);
+  if (hvBmWritable) {
+    const bmIdx = harvestWeb3Ix.keys.findIndex(k => k.pubkey.equals(cpi.binArrayBitmapExt));
+    if (bmIdx >= 0) harvestWeb3Ix.keys[bmIdx].isWritable = true;
+  }
+  tx.add(harvestWeb3Ix);
 
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
   tx.recentBlockhash = blockhash; tx.lastValidBlockHeight = lastValidBlockHeight; tx.feePayer = user;
 
+  const simResult = await conn.simulateTransaction(tx);
+  if (simResult.value.err) {
+    console.error('[monke] Harvest simulation failed:', simResult.value.err, simResult.value.logs);
+    throw new Error('Harvest simulation failed: ' + JSON.stringify(simResult.value.err));
+  }
+
   showToast('Approve harvest...', 'info');
   const signed = await state.wallet.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
   showToast('Confirming harvest...', 'info');
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 }
@@ -2867,9 +3150,9 @@ function showSubPage(subName) {
 // NAVIGATION — bottom panel tabs + dots
 // ============================================================
 
-const PAGE_IDS = ['page-enlist', 'page-trade', 'page-positions', 'page-rank', 'page-ops', 'page-recon'];
-const PAGE_BODY_CLASSES = ['on-enlist', 'on-trade', 'on-positions', 'on-rank', 'on-ops', 'on-recon'];
-const PAGE_ACCENT = ['#F2D662', '#9DE5B5', '#9DE5B5', '#F2D662', '#C4CFCB', '#9DE5B5'];
+const PAGE_IDS = ['page-enlist', 'page-trade', 'page-positions', 'page-rank', 'page-ops'];
+const PAGE_BODY_CLASSES = ['on-enlist', 'on-trade', 'on-positions', 'on-rank', 'on-ops'];
+const PAGE_ACCENT = ['#F2D662', '#9DE5B5', '#9DE5B5', '#F2D662', '#C4CFCB'];
 
 function showPage(idx) {
   state.currentPage = idx;
@@ -3188,7 +3471,7 @@ async function init() {
   });
 
   // Zoom controls
-  const ZOOM_STEPS = [10, 20, 40, 80, 120, 200];
+  const ZOOM_STEPS = [80, 120, 200];
   document.getElementById('zoomIn')?.addEventListener('click', () => {
     const curIdx = ZOOM_STEPS.indexOf(vizState.visibleRange);
     const newIdx = Math.max(0, (curIdx >= 0 ? curIdx : 2) - 1);
@@ -3260,7 +3543,7 @@ async function init() {
   }
   if (rightArrow) {
     rightArrow.addEventListener('mouseenter', () => {
-      const next = sigDots[Math.min(4, state.currentPage + 1)];
+      const next = sigDots[Math.min(PAGE_IDS.length - 1, state.currentPage + 1)];
       if (next) next.classList.add('hover');
     });
     rightArrow.addEventListener('mouseleave', () => sigDots.forEach(d => d.classList.remove('hover')));
@@ -3334,6 +3617,7 @@ async function init() {
   });
 
   // Render pages
+  initBurnFireCanvas();
   renderMonkeList();
   renderRoster();
   renderGlobalStats();
