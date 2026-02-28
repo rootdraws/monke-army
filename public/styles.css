@@ -174,26 +174,21 @@
     .sigil-nav .nav-arrow path { transition: fill 0.2s ease; }
     .sigil-nav .nav-arrow:hover path { fill: #8A9AAA; }
 
-    /* ─── SOCIAL LINKS ─── */
+    /* ─── SOCIAL LINKS ─── inside sigil-nav, pinned to bottom */
 
     .social-links {
-      position: fixed;
-      bottom: 90px; left: 50%; transform: translateX(-50%);
-      z-index: 101;
-      display: flex; gap: 12px; align-items: center;
-      padding: 6px 14px;
-      border: 1px solid var(--faint);
-      border-radius: 20px;
-      background: rgba(15, 26, 58, 0.85);
-      backdrop-filter: blur(12px);
+      position: absolute;
+      bottom: 2px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 10px; align-items: center;
+      pointer-events: all;
     }
     .social-links a {
-      color: var(--dim);
+      color: var(--faint);
       display: flex; align-items: center; justify-content: center;
-      padding: 4px;
+      padding: 3px;
       transition: color 0.2s ease;
     }
-    .social-links a:hover { color: var(--fg); }
+    .social-links a:hover { color: var(--dim); }
 
     /* ─── SITE PAGES ─── full-viewport page containers */
 
