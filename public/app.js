@@ -1650,6 +1650,7 @@ async function createPosition() {
     const userTokenAccount = getAssociatedTokenAddressSync(depositMint, user, false, depositTokenProgramId);
 
     const tx = new solanaWeb3.Transaction();
+    tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
 
     const initBinArrayIxs = await ensureBinArraysExist(cpi.lbPair, minBin, maxBin, user, cpi.dlmmProgram);
     for (const ix of initBinArrayIxs) tx.add(ix);
@@ -1716,9 +1717,6 @@ async function createPosition() {
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
-    // Position keypair must sign (Meteora requires it for initialize_position)
-    tx.partialSign(meteoraPositionKeypair);
-
     // Simulate first to get detailed error logs before wallet popup
     const simResult = await conn.simulateTransaction(tx);
     if (simResult.value.err) {
@@ -1730,8 +1728,11 @@ async function createPosition() {
     }
     if (CONFIG.DEBUG) console.log('[monke] Simulation OK:', simResult.value.logs);
 
+    // Phantom must sign first so it can simulate the tx cleanly (single-signer from its POV).
+    // Position keypair signs after to satisfy Meteora's initialize_position requirement.
     showToast('Approve in wallet...', 'info');
     const signed = await state.wallet.signTransaction(tx);
+    signed.partialSign(meteoraPositionKeypair);
     const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
     showToast('Confirming...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
@@ -1849,6 +1850,7 @@ async function closePosition(index) {
     const roverFeeTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, roverAuthorityPDA, true, cpi.tokenYProgramId);
 
     const tx = new solanaWeb3.Transaction();
+    tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
 
     const [userXInfo, userYInfo, roverFeeXInfo, roverFeeYInfo] = await Promise.all([
       conn.getAccountInfo(userTokenX),
@@ -1944,6 +1946,7 @@ async function closePositionDirect(pos) {
   const roverFeeTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, roverAuthorityPDA, true, cpi.tokenYProgramId);
 
   const tx = new solanaWeb3.Transaction();
+  tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
   const [userXInfo, userYInfo, roverFeeXInfo, roverFeeYInfo] = await Promise.all([
     conn.getAccountInfo(userTokenX),
     conn.getAccountInfo(userTokenY),
@@ -2023,6 +2026,7 @@ async function claimFeesDirect(pos) {
   const userTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, user, false, cpi.tokenYProgramId);
 
   const tx = new solanaWeb3.Transaction();
+  tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
   const [userXInfo, userYInfo] = await Promise.all([conn.getAccountInfo(userTokenX), conn.getAccountInfo(userTokenY)]);
   if (!userXInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenX, user, cpi.tokenXMint, cpi.tokenXProgramId));
   if (!userYInfo) tx.add(createAssociatedTokenAccountIx(user, userTokenY, user, cpi.tokenYMint, cpi.tokenYProgramId));
@@ -2532,6 +2536,7 @@ async function handleFeedMonke(nftMintStr) {
     const userBananasAccount = getAssociatedTokenAddressSync(bananasMint, user);
 
     const tx = new solanaWeb3.Transaction();
+    tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
     const feedIx = await getFeedMonkeInstructionAsync({
       user: asSigner(user),
       nftMint: address(nftMint.toBase58()),
@@ -2575,6 +2580,7 @@ async function handleClaimMonke(nftMintStr) {
     const userNftAccount = getAssociatedTokenAddressSync(nftMint, user);
 
     const tx = new solanaWeb3.Transaction();
+    tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
     const claimIx = await getClaimInstructionAsync({
       user: asSigner(user),
       monkeBurn: address(monkeBurnPDA.toBase58()),
@@ -2609,6 +2615,7 @@ async function handleClaimAll() {
 
   try {
     const tx = new solanaWeb3.Transaction();
+    tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
     for (const nft of claimable) {
       const nftMint = new solanaWeb3.PublicKey(nft.mint);
       const [monkeBurnPDA] = getMonkeBurnPDA(nftMint);
@@ -2871,6 +2878,7 @@ async function handleHarvestPosition(positionPDAStr, lbPairStr, ownerStr, side) 
   const roverFeeTokenY = getAssociatedTokenAddressSync(cpi.tokenYMint, roverAuthorityPDA, true, cpi.tokenYProgramId);
 
   const tx = new solanaWeb3.Transaction();
+  tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
 
   const [ownerXInfo, ownerYInfo, roverFeeXInfo, roverFeeYInfo] = await Promise.all([
     conn.getAccountInfo(ownerTokenX),

@@ -8,14 +8,14 @@ Managed Meteora DLMM positions with sub-second bin harvesting via Helius LaserSt
 
 | Program | Description |
 |---------|-------------|
-| `core.rs` | Position management. Open, harvest, close. All CPI via V2 variants (Token-2022 native). Performance fee on converted output — all fees → rover_authority → `sweep_rover` splits 50/50 (dist_pool + Config.bot). TOKEN fees → rover_authority (BidAskImBalanced DLMM recycling, no market dump). `claim_pool_fees` for DAMM v2 trading fee collection. Permissionless fallback on harvest + close (heartbeat + staleness). Rovers use BidAskImBalanced distribution. Emergency escape hatch for deprecated pools. |
-| `monke_bananas.rs` | Feed BANANAS to your Monke. Burn $BANANAS (1M per tx, unlimited stacking) against SMB Gen2 (2x weight) or Gen3 (1x weight) NFTs. MasterChef accumulator. 50% of all fees flow to fed monke holders (50% to bot operations). `compost_monke`: permissionless cleanup of burned NFTs. |
+| `core.rs` | Position management. Open, harvest, close. All CPI via V2 variants (Token-2022 native). Performance fee on converted output — all fees → rover_authority → `sweep_rover` splits 50/50 (dist_pool + Config.bot). TOKEN fees → rover_authority (BidAskImBalanced DLMM recycling, no market dump). Permissionless fallback on harvest + close (heartbeat + staleness). Rovers use BidAskImBalanced distribution. Emergency escape hatch for deprecated pools. |
+| `monke_bananas.rs` | Feed BANANAS to your Monke. Burn $BANANAS (1M per tx, unlimited stacking) against SMB Gen2 (2x weight) or Gen3 (1x weight) NFTs. MasterChef accumulator. 50% of protocol fees flow to fed monke holders (50% to bot operations). `compost_monke`: permissionless cleanup of burned NFTs. |
 
 ## How It Works
 
 Users deposit single-sided liquidity into Meteora DLMM bins via the core program — sell the rips (tokens above price) or buy the dips (SOL below price). A vault PDA owns the Meteora position on behalf of the user. As price moves through bins, Monke's Harvester detects fully-converted bins in sub-second via Helius LaserStream gRPC and calls `harvest_bins` to withdraw them. Tokens flow Meteora → vault ATA → owner wallet in a single instruction.
 
-Performance fee (0.3%) is taken on converted output only. All fees flow through rover_authority. `sweep_rover` splits 50/50: half to dist_pool (monke holders), half to `Config.bot` (operations). Hardcoded on-chain. TOKEN fees route to rover_authority for BidAskImBalanced DLMM recycling — no market dumping on thin meme pools. DAMM v2 $BANANAS/SOL trading fees are claimed via `claim_pool_fees` through rover_authority. Unconverted deposits return untaxed.
+Performance fee (0.3%) is taken on converted output only. All fees flow through rover_authority. `sweep_rover` splits 50/50: half to dist_pool (monke holders), half to `Config.bot` (operations). Hardcoded on-chain. TOKEN fees route to rover_authority for BidAskImBalanced DLMM recycling — no market dumping on thin meme pools. Unconverted deposits return untaxed.
 
 ### Key Instructions
 
@@ -62,11 +62,6 @@ close_rover_token_account()
   → Permissionless. Closes any token account owned by rover_authority.
   → For WSOL: unwraps to native SOL on rover_authority (picked up by sweep_rover).
   → For empty ATAs: reclaims rent to rover_authority.
-
-claim_pool_fees()
-  → Permissionless. Claims DAMM v2 trading fees to rover_authority.
-  → CPI into DAMM v2 program, rover_authority PDA signs as position owner.
-  → SOL accumulates in rover_authority → sweep_rover splits 50/50 (dist_pool + Config.bot).
 ```
 
 ### Bin Detection Logic — Sell the Rips, Buy the Dips
@@ -179,12 +174,11 @@ cp bot/anchor-harvest-bot.env.example bot/.env
 npm run bot
 ```
 
-Required env vars: `RPC_URL`, `GRPC_ENDPOINT`, `BOT_KEYPAIR_PATH`, `CORE_PROGRAM_ID`, `MONKE_BANANAS_PROGRAM_ID`, `BANANAS_MINT`. Plus DAMM v2 vars when pool is live: `DAMM_V2_POOL`, `DAMM_V2_POSITION`, `DAMM_V2_POSITION_NFT`, `DAMM_V2_TOKEN_A_MINT`, `DAMM_V2_TOKEN_B_MINT`, `DAMM_V2_TOKEN_A_VAULT`, `DAMM_V2_TOKEN_B_VAULT`.
+Required env vars: `RPC_URL`, `GRPC_ENDPOINT`, `BOT_KEYPAIR_PATH`, `CORE_PROGRAM_ID`, `MONKE_BANANAS_PROGRAM_ID`, `BANANAS_MINT`.
 
 Saturday sequence:
-1. Claim DAMM v2 pool trading fees → rover_authority
-2. Close WSOL ATAs on rover_authority (unwrap to native SOL)
-3. Sweep SOL from rover_authority → 50% dist_pool + 50% Config.bot
+1. Close WSOL ATAs on rover_authority (unwrap to native SOL)
+2. Sweep SOL from rover_authority → 50% dist_pool + 50% Config.bot
 4. Open fee rover positions from accumulated token fees (BidAskImBalanced DLMM)
 5. Deposit SOL from dist_pool → monke program vault → accumulator
 6. Close exhausted rover positions (reclaim rent)
@@ -215,17 +209,6 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page),
 |------|---------|
 | $BANANAS Mint | `ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w` |
 
-### DAMM v2 Pool
-
-| Item | Address |
-|------|---------|
-| Pool | `GxC4SFsT2sJEPjgXziBmCnBkrpvwYzZYWPoWRpTj9jZR` |
-| Alpha Vault | `3Xv442KEA3kkAAaRbPH9YPt3XCsJ8EjjZisGjvgksXd5` |
-| Position (locked) | `6MmPrnhPzCSKroURAHVETmrk6i5SJxuS1SqHbcbPMXH9` |
-| Position NFT Mint | `CaFB7AsZYA7gXLgXSjByR5wArFWrQTZete4W666X7b4G` |
-| Token A Vault (BANANAS) | `2nBSPJFyt258bK1LSEQ42RVSSjnsvVzHScuuHVnoGSd1` |
-| Token B Vault (SOL) | `8vq8yCoUPpt4r53TdPyZZNS3dLr59S76UUu43hV4fWW9` |
-
 ### PDAs
 
 | PDA | Address | Program |
@@ -244,7 +227,7 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page),
 - **Activation:** March 1, 2026 00:00 UTC (trading begins)
 - **Vesting:** Instant (1s after activation)
 - **Fee Decay:** 69% → 1% over 3 hours (sniper tax)
-- **Liquidity:** 100% permanently locked to rover_authority. No dev allocation.
+- **Liquidity:** 100% permanently locked. No dev allocation.
 - **Supply:** 1,000,000,000 BANANAS (6 decimals). Mint/freeze/update authorities revoked.
 
 ## SMB Integration — Feed Your Monke
@@ -253,7 +236,7 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page),
 - **Gen3 Collection:** `8Rt3Ayqth4DAiPnW9MDFi63TiQJHmohfTWLMQFHi4KZH` — **1x weight per feed**
 - **Burn:** 1,000,000 $BANANAS per `feed_monke` call (6 decimals enforced at init)
 - **Stacking:** Unlimited. Per-NFT `MonkeBurn` PDA tracks cumulative weight.
-- **Revenue:** 50% of all protocol fees + rover proceeds + DAMM v2 trading fees flow to fed monke holders. 50% funds bot operations.
+- **Revenue:** 50% of protocol fees flow to fed monke holders. 50% funds bot operations.
 - **Claiming:** Weight and unclaimed SOL travel with the NFT on secondary sales.
 - **Cleanup:** `compost_monke` — permissionless removal of dead weight when NFT is burned (supply == 0)
 

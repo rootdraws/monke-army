@@ -63,7 +63,7 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 - [ ] **Test feed_monke** — Rank page, select SMB NFT, click "Burn 1M $BANANAS to your Monke." Verify weight increments.
 - [ ] **Test claim** — After deposit_sol, click "claim" on fed monke. Verify SOL arrives.
 - [ ] **Test permissionless fallback** — Stop bot for 60s. Go to Ops bounty board. Click "harvest" on a pending position. Verify keeper tip.
-- [ ] **Validate Saturday keeper** — Wait for Saturday or manually trigger. Verify 6-step sequence: claim_pool_fees -> unwrap WSOL -> sweep_rover -> fee rovers -> deposit_sol -> cleanup.
+- [ ] **Validate Saturday keeper** — Wait for Saturday or manually trigger. Verify 5-step sequence: unwrap WSOL -> sweep_rover -> fee rovers -> deposit_sol -> cleanup.
 
 ---
 
@@ -91,10 +91,9 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
 ## Ideas
 
-- Aggregated order profiles across DLMM + DAMM v2 pools
+- Aggregated order profiles across DLMM pools
 - NFT metadata for commonly traded pairs
 - Question Market Workflow (one token CA -> pool launch flow)
-- DAMM v2 Pool Liquidity profiles
 - Discord Bot for bin fill notifications
 
 ---

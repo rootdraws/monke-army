@@ -30,7 +30,7 @@ import * as fs from 'fs';
 import { GeyserSubscriber, HarvestJob } from './geyser-subscriber';
 import { HarvestExecutor } from './harvest-executor';
 import { MonkeKeeper } from './keeper';
-import { RelayServer } from './relay-server';
+import { RelayServer, FeePipelineState } from './relay-server';
 import { logger } from './logger';
 import { getDLMMCacheSize, getDLMM } from './meteora-accounts';
 import * as path from 'path';
@@ -218,6 +218,53 @@ class HarvestBot {
         closes: this.executor?.totalCloses ?? 0,
       },
       samples: this.balanceHistory.length,
+    };
+  }
+
+  async getFeePipelineState(): Promise<FeePipelineState> {
+    const [roverPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('rover_authority')], CORE_PROGRAM_ID
+    );
+    const [dPoolPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dist_pool')], MONKE_BANANAS_PROGRAM_ID
+    );
+    const [pVaultPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('program_vault')], MONKE_BANANAS_PROGRAM_ID
+    );
+    const [mStatePDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('monke_state')], MONKE_BANANAS_PROGRAM_ID
+    );
+    const wsolMint = new PublicKey('So11111111111111111111111111111111111111112');
+
+    const [roverBal, distBal, vaultBal, monkeStateInfo] = await Promise.all([
+      this.connection.getBalance(roverPDA),
+      this.connection.getBalance(dPoolPDA),
+      this.connection.getBalance(pVaultPDA),
+      (this.monkeProgram.account as any).monkeState.fetch(mStatePDA).catch(() => null),
+    ]);
+
+    let wsolBal = 0;
+    try {
+      const { getAssociatedTokenAddressSync: getAta } = await import('@solana/spl-token');
+      const ata = getAta(wsolMint, roverPDA, true);
+      const info = await this.connection.getAccountInfo(ata);
+      if (info && info.data.length >= 72) wsolBal = Number(info.data.readBigUInt64LE(64));
+    } catch { /* no WSOL ATA */ }
+
+    const ms = monkeStateInfo ? {
+      totalShareWeight: (monkeStateInfo as any).totalShareWeight.toString(),
+      accumulatedSolPerShare: (monkeStateInfo as any).accumulatedSolPerShare.toString(),
+      totalSolDistributed: Number((monkeStateInfo as any).totalSolDistributed),
+      totalBananasBurned: (monkeStateInfo as any).totalBananasBurned.toString(),
+    } : null;
+
+    return {
+      roverAuthority: { address: roverPDA.toBase58(), solBalance: roverBal, wsolBalance: wsolBal },
+      distPool: { address: dPoolPDA.toBase58(), solBalance: distBal },
+      programVault: { address: pVaultPDA.toBase58(), solBalance: vaultBal },
+      monkeState: ms,
+      totalInPipeline: roverBal + wsolBal + distBal + vaultBal,
+      timestamp: Date.now(),
     };
   }
 
@@ -439,7 +486,11 @@ class HarvestBot {
     this.startHealthServer();
 
     // Initialize relay server (WebSocket + REST) on the same HTTP server
-    this.relay = new RelayServer(this.subscriber, this.executor, this.keeper, () => this.getBotWalletInfo());
+    this.relay = new RelayServer(
+      this.subscriber, this.executor, this.keeper,
+      () => this.getBotWalletInfo(),
+      () => this.getFeePipelineState(),
+    );
     if (this.healthServer) {
       this.relay.attach(this.healthServer);
       logger.info(`[relay] WebSocket relay on :${HEALTH_PORT}/ws, REST on :${HEALTH_PORT}/api/*`);

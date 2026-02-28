@@ -92,7 +92,7 @@ The result is structural predation against existing passive LPs. Your users are 
 50% of fees to monke holders. 50% to operations (bot self-funding). Zero team token allocation.
 
 ```
-Three revenue streams → sweep_rover splits 50/50:
+Two revenue streams → sweep_rover splits 50/50:
 
 1. Position fees (0.3% on converted output)
      SOL fees → rover_authority WSOL ATA → close_rover_token_account (unwrap)
@@ -103,9 +103,6 @@ Three revenue streams → sweep_rover splits 50/50:
 2. Rover bribe proceeds
      External deposits → rover DLMM positions → converts to SOL
         → sweep_rover → 50/50 split
-
-3. $BANANAS/SOL trading fees (DAMM v2 pool)
-     claim_pool_fees → rover_authority → sweep_rover → 50/50 split
 ```
 
 The 50/50 split is hardcoded in `sweep_rover`. The operator's share goes to `Config.bot` — the same keypair that pays for all harvest, close, and keeper transactions. The bot self-funds from protocol revenue. Effective user cost: 0.15% (half of the 0.3% fee).
@@ -132,10 +129,10 @@ Prefer Aesthetic.
 Yes. Runtime detection, V1/V2 CPI branching. Zero additional configuration. Exception: Token-2022 mints with active transfer hooks are not yet supported.
 
 **What about the dev fee?**
-50% of protocol fees go to monke holders who burned $BANANAS. 50% goes to the bot keypair to fund operations (harvest transactions, keeper cranks, rover rent). Zero team token allocation — the dev participates in the Alpha Vault fair launch like everyone else, same price, same terms. The 50/50 split is hardcoded on-chain.
+50% of protocol fees go to monke holders who burned $BANANAS. 50% goes to the bot keypair to fund operations (harvest transactions, keeper cranks, rover rent). DAMM v2 pool trading fees are retained by the operator. Zero team token allocation — the dev participates in the Alpha Vault fair launch like everyone else, same price, same terms. The 50/50 split on protocol fees is hardcoded on-chain.
 
 **How was $BANANAS launched?**
-100% of supply (1B tokens, 6 decimals) into a Meteora DAMM v2 pool. Alpha Vault pro-rata fair launch — everyone deposits SOL during a 2-week window, everyone gets the same price. 420 SOL vault capacity. initPrice: 0.000001 SOL/token (1 SOL = 1 monke feed). Liquidity permanently locked to rover_authority. 69% sniper tax decaying to 1% over 3 hours. Zero dev allocation. No pre-mine. No team tokens.
+100% of supply (1B tokens, 6 decimals) into a Meteora DAMM v2 pool. Alpha Vault pro-rata fair launch — everyone deposits SOL during a 2-week window, everyone gets the same price. 420 SOL vault capacity. initPrice: 0.000001 SOL/token (1 SOL = 1 monke feed). Liquidity permanently locked. 69% sniper tax decaying to 1% over 3 hours. Zero dev allocation. No pre-mine. No team tokens.
 
 ---
 

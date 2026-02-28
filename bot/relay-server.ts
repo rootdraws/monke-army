@@ -50,6 +50,21 @@ export interface RoverTvlEntry {
 
 // ═══ RELAY SERVER ═══
 
+/** Fee pipeline state returned by the /api/fees endpoint */
+export interface FeePipelineState {
+  roverAuthority: { address: string; solBalance: number; wsolBalance: number };
+  distPool: { address: string; solBalance: number };
+  programVault: { address: string; solBalance: number };
+  monkeState: {
+    totalShareWeight: string;
+    accumulatedSolPerShare: string;
+    totalSolDistributed: number;
+    totalBananasBurned: string;
+  } | null;
+  totalInPipeline: number;
+  timestamp: number;
+}
+
 export class RelayServer {
   private wss: InstanceType<typeof WebSocketServer> | null = null;
   private clients: Set<WebSocket> = new Set();
@@ -57,6 +72,7 @@ export class RelayServer {
   private executor: HarvestExecutor;
   private keeper: MonkeKeeper;
   private botWalletProvider: (() => any) | null;
+  private feeProvider: (() => Promise<FeePipelineState>) | null;
 
   // Rover TVL cache (computed by keeper, exposed via REST)
   private roverTvl: Map<string, RoverTvlEntry> = new Map();
@@ -70,11 +86,13 @@ export class RelayServer {
     executor: HarvestExecutor,
     keeper: MonkeKeeper,
     botWalletProvider?: () => any,
+    feeProvider?: () => Promise<FeePipelineState>,
   ) {
     this.subscriber = subscriber;
     this.executor = executor;
     this.keeper = keeper;
     this.botWalletProvider = botWalletProvider ?? null;
+    this.feeProvider = feeProvider ?? null;
   }
 
   /**
@@ -177,6 +195,9 @@ export class RelayServer {
           return this.handleStats(res);
         case '/api/bot-wallet':
           return this.handleBotWallet(res);
+        case '/api/fees':
+          this.handleFees(res);
+          return true;
         default:
           // Check for /api/pools/{address}
           if (path.startsWith('/api/pools/')) {
@@ -346,6 +367,20 @@ export class RelayServer {
     }
     this.json(res, 200, this.botWalletProvider());
     return true;
+  }
+
+  private async handleFees(res: ServerResponse): Promise<void> {
+    if (!this.feeProvider) {
+      this.json(res, 503, { error: 'Fee pipeline info not available' });
+      return;
+    }
+    try {
+      const state = await this.feeProvider();
+      this.json(res, 200, state);
+    } catch (e: any) {
+      logger.error(`[relay] Fee pipeline query error: ${e.message}`);
+      this.json(res, 500, { error: 'Failed to query fee pipeline' });
+    }
   }
 
   // ─── BROADCAST ───

@@ -2,10 +2,9 @@
  * keeper.ts
  *
  * Saturday sequencer for monke.army.
- * 6-step weekly sequence — no phases, no state machine. 50/50 split (monke holders / bot operations).
+ * 5-step weekly sequence — no phases, no state machine. 50/50 split (monke holders / bot operations).
  *
  * Saturday sequence:
- *   0. claim_pool_fees   — DAMM v2 pool trading fees → rover_authority
  *   1. close_rover_wsol  — WSOL ATA → native SOL on rover_authority
  *   2. sweep_rover       — native SOL → dist_pool
  *   3. open_fee_rovers   — token ATAs → DLMM positions
@@ -141,7 +140,6 @@ export class MonkeKeeper {
    * 50/50 split — half to monke holders, half to bot (Config.bot).
    *
    * On Saturday (or whenever fees have accumulated):
-   *   0. claim_pool_fees   — DAMM v2 → rover_authority
    *   1. close_rover_wsol  — WSOL ATA → native SOL on rover_authority
    *   2. sweep_rover       — native SOL → dist_pool
    *   3. open_fee_rovers   — token ATAs → DLMM positions
@@ -169,9 +167,6 @@ export class MonkeKeeper {
       // Refresh priority fees for this sequence
       this.priorityIxs = await buildKeeperPriorityIxs(this.connection);
 
-      // Step 0: Claim DAMM v2 pool trading fees → rover_authority
-      await this.crankClaimPoolFees();
-
       // Step 1: Close WSOL ATA on rover_authority → unwrap to native SOL
       await this.crankCloseRoverWsol();
 
@@ -194,98 +189,6 @@ export class MonkeKeeper {
 
     logger.info(`[keeper] ${ts} Active — nothing to crank (not Saturday)`);
     return 'Active';
-  }
-
-  // ─── CRANK: CLAIM DAMM V2 POOL FEES ───
-
-  /**
-   * Claim trading fees from the DAMM v2 $BANANAS/SOL pool.
-   * Position NFT is held by rover_authority. SOL fees land in rover_authority.
-   * sweep_rover then moves them to dist_pool.
-   *
-   * Skips if DAMM_V2_POOL is not configured (pool not yet launched).
-   * Permissionless — anyone can crank.
-   */
-  private async crankClaimPoolFees(): Promise<void> {
-    const pool = process.env.DAMM_V2_POOL;
-    const position = process.env.DAMM_V2_POSITION;
-    const positionNft = process.env.DAMM_V2_POSITION_NFT;
-
-    if (!pool || !position || !positionNft) {
-      logger.info('  [keeper] claim_pool_fees skipped — DAMM v2 pool not configured');
-      return;
-    }
-
-    try {
-      const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } = await import('@solana/spl-token');
-      const DAMM_V2_PROGRAM_ID = new PublicKey('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG');
-      const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
-
-      const poolKey = new PublicKey(pool);
-      const positionKey = new PublicKey(position);
-      const positionNftKey = new PublicKey(positionNft);
-      const [roverAuthority] = roverAuthorityPDA(this.coreProgramId);
-      const [configPDA] = coreConfigPDA(this.coreProgramId);
-
-      // Fetch pool state to get vault addresses and mints
-      // DAMM v2 pool account layout: we need tokenAMint, tokenBMint, tokenAVault, tokenBVault
-      // For now, read from env vars (set after pool creation)
-      const tokenAMint = new PublicKey(process.env.DAMM_V2_TOKEN_A_MINT || '');
-      const tokenBMint = new PublicKey(process.env.DAMM_V2_TOKEN_B_MINT || 'So11111111111111111111111111111111111111112');
-      const tokenAVault = new PublicKey(process.env.DAMM_V2_TOKEN_A_VAULT || '');
-      const tokenBVault = new PublicKey(process.env.DAMM_V2_TOKEN_B_VAULT || '');
-
-      if (!process.env.DAMM_V2_TOKEN_A_MINT || !process.env.DAMM_V2_TOKEN_A_VAULT || !process.env.DAMM_V2_TOKEN_B_VAULT) {
-        logger.info('  [keeper] claim_pool_fees skipped — DAMM v2 vault addresses not configured');
-        return;
-      }
-
-      // Derive rover_authority ATAs for token A and token B
-      const roverTokenA = getAssociatedTokenAddressSync(tokenAMint, roverAuthority, true);
-      const roverTokenB = getAssociatedTokenAddressSync(tokenBMint, roverAuthority, true);
-
-      // Position NFT account (ATA of rover_authority for the position NFT mint)
-      const positionNftAccount = getAssociatedTokenAddressSync(positionNftKey, roverAuthority, true);
-
-      await withRetry(
-        () => this.coreProgram.methods
-          .claimPoolFees()
-          .accounts({
-            caller: this.botKeypair.publicKey,
-            config: configPDA,
-            roverAuthority,
-          })
-          .remainingAccounts([
-            { pubkey: poolKey, isWritable: true, isSigner: false },           // pool
-            { pubkey: positionKey, isWritable: true, isSigner: false },       // position
-            { pubkey: positionNftAccount, isWritable: false, isSigner: false }, // position_nft_account
-            { pubkey: tokenAVault, isWritable: true, isSigner: false },       // token_a_vault
-            { pubkey: tokenBVault, isWritable: true, isSigner: false },       // token_b_vault
-            { pubkey: tokenAMint, isWritable: false, isSigner: false },       // token_a_mint
-            { pubkey: tokenBMint, isWritable: false, isSigner: false },       // token_b_mint
-            { pubkey: roverTokenA, isWritable: true, isSigner: false },       // rover_token_a
-            { pubkey: roverTokenB, isWritable: true, isSigner: false },       // rover_token_b
-            { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false }, // token_a_program
-            { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false }, // token_b_program
-            { pubkey: MEMO_PROGRAM_ID, isWritable: false, isSigner: false },  // memo_program
-            { pubkey: DAMM_V2_PROGRAM_ID, isWritable: false, isSigner: false }, // damm_v2_program
-          ])
-          .preInstructions(this.priorityIxs)
-          .signers([this.botKeypair])
-          .rpc(),
-        'claim_pool_fees'
-      );
-
-      logger.info('  [keeper] claim_pool_fees — DAMM v2 fees claimed to rover_authority');
-    } catch (e: any) {
-      // Non-fatal — fees just accumulate until next crank
-      const msg = e.message || '';
-      if (msg.includes('NoBinsProvided') || msg.includes('0x0')) {
-        logger.info('  [keeper] claim_pool_fees skipped — no fees to claim');
-      } else {
-        logger.warn(`[keeper] claim_pool_fees error: ${msg.slice(0, 120)}`);
-      }
-    }
   }
 
   // ─── CRANK: SWEEP ROVER (SOL) ───
