@@ -51,6 +51,7 @@
     .tangent-ray.top { top: 19px; left: 90px; right: 90px; height: 1px; border-top: 1px dashed var(--scaffold); }
     .tangent-ray.left { left: 19px; top: 90px; bottom: 90px; width: 1px; border-left: 1px dashed var(--scaffold); }
     .tangent-ray.right { right: 19px; top: 90px; bottom: 90px; width: 1px; border-left: 1px dashed var(--scaffold); }
+    .tangent-ray.bottom { bottom: 19px; left: 90px; right: 90px; height: 1px; border-top: 1px dashed var(--scaffold); }
 
     /* ─── TRADE LAYOUT ─── two vertical panels flanking the sigil */
 
@@ -143,7 +144,7 @@
 
     .sigil-nav {
       position: fixed;
-      bottom: 0; left: 50%; transform: translateX(-50%);
+      bottom: 25px; left: 50%; transform: translateX(-50%);
       width: 280px; height: 100px;
       z-index: 100; pointer-events: none;
     }
