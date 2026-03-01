@@ -225,6 +225,13 @@ async function fetchUserDeposit() {
         );
       }
 
+      // If vault was never filled, update claim button to say "withdraw SOL"
+      const swapped = enlistState.vault.vault.swappedAmount?.toNumber() || 0;
+      if (swapped === 0 && deposit > 0) {
+        const claimBtn = document.getElementById('enlistClaimBtn');
+        if (claimBtn) claimBtn.textContent = `withdraw ${depositSol} SOL`;
+      }
+
       // Phase 3: claim info (how many $BANANAS the user is allocated)
       const claimInfo = enlistState.vault.getClaimInfo(escrow);
       if (claimInfo && claimInfo.totalAllocated) {
@@ -516,13 +523,31 @@ async function handleClaim() {
   if (btn) { btn.textContent = 'claiming...'; btn.disabled = true; }
 
   try {
-    // DAMM v2 vaults: SDK fillVault is unimplemented — fill manually first
-    if (enlistState.vault.vault.poolType === 2) {
-      const inAmountCap = enlistState.vault.vault.vaultMode === 0
-        ? BN.min(enlistState.vault.vault.totalDeposit, enlistState.vault.vault.maxBuyingCap)
-        : enlistState.vault.vault.totalDeposit;
+    const vault = enlistState.vault.vault;
+    const swapped = vault.swappedAmount?.toNumber() || 0;
+    const deposited = vault.totalDeposit?.toNumber() || 0;
 
-      if (enlistState.vault.vault.swappedAmount.lt(inAmountCap)) {
+    // Vault never filled — withdraw SOL directly via withdrawRemainingQuote
+    if (swapped === 0 && deposited > 0) {
+      if (btn) btn.textContent = 'withdrawing SOL...';
+      const refundTx = await enlistState.vault.withdrawRemainingQuote(wallet.publicKey);
+      const signed = await wallet.signTransaction(refundTx);
+      const sig = await enlistState.connection.sendRawTransaction(signed.serialize());
+      await enlistState.connection.confirmTransaction(sig, 'confirmed');
+
+      showToast(`${(deposited / LAMPORTS_PER_SOL).toFixed(4)} SOL withdrawn — solscan.io/tx/${sig}`, 'success');
+      await fetchVaultStats();
+      await updateWalletBalance();
+      return;
+    }
+
+    // DAMM v2 vaults: SDK fillVault is unimplemented — fill manually first
+    if (vault.poolType === 2) {
+      const inAmountCap = vault.vaultMode === 0
+        ? BN.min(vault.totalDeposit, vault.maxBuyingCap)
+        : vault.totalDeposit;
+
+      if (vault.swappedAmount.lt(inAmountCap)) {
         if (btn) btn.textContent = 'filling vault...';
         await fillVaultDammV2(wallet);
       }
@@ -539,7 +564,12 @@ async function handleClaim() {
     await fetchBananasBalance();
   } catch (err) {
     console.error('[enlist] Claim error:', err);
-    showToast(`claim failed: ${err.message?.slice(0, 80)}`, 'error');
+    const msg = err.message || '';
+    if (msg.includes('NotPermitThisActionInThisTimePoint')) {
+      showToast('claim not available yet — trading hasn\'t activated', 'error');
+    } else {
+      showToast(`claim failed: ${msg.slice(0, 80)}`, 'error');
+    }
   } finally {
     if (btn) { btn.textContent = originalText; btn.disabled = false; }
   }
