@@ -465,14 +465,19 @@ export class RelayServer {
         const vol24h = meteoraData?.volume?.['24h'] || 0;
         const tvl = meteoraData?.tvl || 0;
 
+        const binStep = meteoraData?.pool_config?.bin_step || 0;
+        const alive = vol24h > 0 || tvl > 100;
+
         const item = {
           pair: entry.pair,
           name,
+          binStep,
           openPositions: liveCount,
           lastActive: entry.lastActive,
           totalPositions: entry.totalPositionsOpened,
           volume24h: vol24h,
           tvl,
+          alive,
         };
 
         if (liveCount > 0) {
@@ -480,8 +485,7 @@ export class RelayServer {
         } else {
           const fourteenDays = 14 * 24 * 60 * 60;
           const isRecent = (Math.floor(Date.now() / 1000) - entry.lastActive) < fourteenDays;
-          const isAlive = vol24h > 0 || tvl > 100;
-          if (isRecent && isAlive) {
+          if (isRecent && alive) {
             recentPools.push(item);
           }
         }
@@ -493,11 +497,13 @@ export class RelayServer {
           activePools.push({
             pair: pool,
             name: meteoraData?.name || pool.slice(0, 8) + '...',
+            binStep: meteoraData?.pool_config?.bin_step || 0,
             openPositions: count,
             lastActive: Math.floor(Date.now() / 1000),
             totalPositions: count,
             volume24h: meteoraData?.volume?.['24h'] || 0,
             tvl: meteoraData?.tvl || 0,
+            alive: true,
           });
         }
       }
@@ -508,6 +514,8 @@ export class RelayServer {
       this.json(res, 200, {
         active: activePools,
         recent: recentPools.slice(0, 10),
+        wallet,
+        timestamp: Date.now(),
       });
     } catch (e: any) {
       logger.error(`[relay] /api/addressbook error: ${e.message}`);

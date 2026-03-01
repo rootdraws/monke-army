@@ -3657,6 +3657,7 @@ async function init() {
   renderReconTop5();
 
   fetchTrendingPools();
+  setInterval(fetchTrendingPools, 60_000);
 
   if (CONFIG.DEFAULT_POOL) {
     const poolInput = document.getElementById('poolAddress');
