@@ -1784,7 +1784,7 @@ async function createPosition() {
 
     await refreshPositionsList();
     loadBinVizData();
-    if (state.currentPage === 2) renderPositionsPage();
+    if (state.currentPage === 1) renderPositionsPage();
   } catch (err) {
     console.error('Position creation failed:', err);
     showToast('Failed: ' + (err?.message || err), 'error');
@@ -3234,20 +3234,20 @@ function showPage(idx) {
     }
   }
 
-  // Highlight active pool orbital on Trade page (now idx 1)
-  if (idx === 1) {
+  // Highlight active pool orbital on Trade page (idx 0)
+  if (idx === 0) {
     const orbitals = document.querySelectorAll('.orbital');
     orbitals.forEach((o, i) => o.classList.toggle('sub-active', i === state.activePoolOrbital));
     setTimeout(renderBinViz, 50);
   }
 
-  // Positions page
-  if (idx === 2) {
+  // Positions page (idx 1)
+  if (idx === 1) {
     renderPositionsPage();
   }
 
-  // Activate/deactivate orbital sub-nav based on page (Rank = idx 3)
-  if (idx === 3) {
+  // Activate/deactivate orbital sub-nav based on page (Rank = idx 2)
+  if (idx === 2) {
     showSubPage(state.currentSubPage);
   } else {
     // Off Rank page: clear all orbital highlights + sigils
