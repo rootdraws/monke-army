@@ -86,7 +86,6 @@ monke-army/
 │   │   └── meteora_dlmm_cpi.rs   # Meteora DLMM CPI wrappers (V2 only)
 │   └── monke-bananas/src/lib.rs   # Burn $BANANAS, stack weight, claim SOL, compost dead monkes
 ├── src/
-│   ├── enlist.js                  # Alpha Vault SDK integration (bundled → dist/enlist.bundle.js)
 │   └── generated/                 # Codama-generated TypeScript clients (bin-farm + monke-bananas)
 ├── bot/                           # Monke's Harvester (off-chain infrastructure)
 │   ├── anchor-harvest-bot.ts      # Orchestrator + health endpoint + relay wiring
@@ -104,7 +103,7 @@ monke-army/
 │   └── config.json                # Program IDs, RPC, BOT_RELAY_URL
 ├── scripts/
 │   ├── deploy-and-init.mjs        # Deploy + init programs atomically (anti-front-run)
-│   ├── build-frontend.mjs         # Frontend build: bundle app.js (Codama + @solana/kit) + enlist.js
+│   ├── build-frontend.mjs         # Frontend build: bundle app.js (Codama + @solana/kit)
 │   ├── generate-clients.mjs       # Codama client generation from IDL → src/generated/
 │   ├── test-close-position.ts     # Close a stuck position (mainnet)
 │   └── recycle-fee-rover.ts       # Open fee rover from accumulated token fees
@@ -251,7 +250,6 @@ Frontend pages: **Trade** (DLMM harvester, default SOL/USDC pool), **Positions**
 - Rust (via rustup)
 - Node.js 18+
 - Meteora DLMM SDK (`@meteora-ag/dlmm`)
-- Meteora Alpha Vault SDK (`@meteora-ag/alpha-vault`)
 - Helius LaserStream gRPC (`@triton-one/yellowstone-grpc`)
 - tsx (TypeScript execution for bot)
 - `@solana/kit` (Codama-generated client runtime)
