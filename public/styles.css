@@ -2,18 +2,18 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
-      --bg: #0F1A3A;
-      --fg: #C4CFCB;
-      --dim: #607080;
-      --faint: #3D5280;
-      --scaffold: #3A5A28;
-      --scaffold-fill: #4A6A38;
-      --sell: #8B4513;
-      --sell-faint: rgba(139, 69, 19, 0.12);
-      --mint: #9DE5B5;
-      --mint-faint: rgba(157, 229, 181, 0.12);
-      --bananas: #F2D662;
-      --bananas-faint: rgba(242, 214, 98, 0.12);
+      --bg: #111118;
+      --fg: #D8D0C4;
+      --dim: #908478;
+      --faint: #5E554C;
+      --scaffold: #7A6848;
+      --scaffold-fill: #8A7858;
+      --sell: #C05848;
+      --sell-faint: rgba(192, 88, 72, 0.12);
+      --mint: #80C898;
+      --mint-faint: rgba(128, 200, 152, 0.12);
+      --bananas: #D8B440;
+      --bananas-faint: rgba(216, 180, 64, 0.12);
     }
 
     body {
@@ -45,7 +45,7 @@
     body.on-trade .corner.bottom-right { bottom: 20px; }
 
     .hoverable { pointer-events: all; cursor: pointer; transition: stroke 0.3s ease; }
-    .hoverable:hover { stroke: #8A9AAA; }
+    .hoverable:hover { stroke: #A09488; }
 
     .tangent-ray { position: fixed; pointer-events: none; }
     .tangent-ray.top { top: 19px; left: 90px; right: 90px; height: 1px; border-top: 1px dashed var(--scaffold); }
@@ -66,7 +66,7 @@
     .trade-left-panel {
       flex: 0 1 40%; min-width: 200px;
       display: flex; flex-direction: column;
-      border: 1px solid rgba(30, 45, 80, 0.3);
+      border: 1px solid rgba(60, 50, 40, 0.35);
       border-radius: 2px;
       padding: 12px;
     }
@@ -79,7 +79,7 @@
 
     .trade-order-form {
       display: flex; flex-direction: column; gap: 10px;
-      border: 1px solid rgba(30, 45, 80, 0.3);
+      border: 1px solid rgba(60, 50, 40, 0.35);
       border-radius: 2px;
       padding: 16px;
     }
@@ -102,7 +102,7 @@
     }
     .zoom-btn {
       width: 22px; height: 22px;
-      background: transparent; border: 1px solid rgba(58, 90, 140, 0.3);
+      background: transparent; border: 1px solid rgba(90, 78, 60, 0.35);
       border-radius: 2px; color: var(--dim);
       font-size: 13px; font-family: inherit; font-weight: 200;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -135,8 +135,8 @@
     .legend-swatch {
       width: 12px; height: 3px; border-radius: 1px;
     }
-    .legend-swatch.pool-buy-swatch { background: rgba(74, 222, 128, 0.35); }
-    .legend-swatch.pool-sell-swatch { background: rgba(239, 68, 68, 0.35); }
+    .legend-swatch.pool-buy-swatch { background: rgba(128, 200, 152, 0.35); }
+    .legend-swatch.pool-sell-swatch { background: rgba(192, 88, 72, 0.35); }
     .legend-swatch.yours-swatch { background: var(--mint); }
     .legend-swatch.preview-swatch { background: var(--mint); opacity: 0.35; }
 
@@ -173,7 +173,7 @@
     .sigil-nav .nav-arrow.left { left: 0; }
     .sigil-nav .nav-arrow.right { right: 0; }
     .sigil-nav .nav-arrow path { transition: fill 0.2s ease; }
-    .sigil-nav .nav-arrow:hover path { fill: #8A9AAA; }
+    .sigil-nav .nav-arrow:hover path { fill: #A09488; }
 
     /* ─── SOCIAL LINKS ─── inside sigil-nav, pinned to bottom */
 
@@ -237,7 +237,7 @@
 
     .wallet-options {
       position: fixed; top: 52px; right: 115px;
-      background: rgba(15, 26, 58, 0.95);
+      background: rgba(17, 17, 24, 0.95);
       border: 1px solid var(--faint);
       padding: 6px 0; z-index: 200; display: none;
       backdrop-filter: blur(20px);
@@ -384,13 +384,13 @@
       gap: 10px; padding: 8px 0;
       font-size: 10px; color: var(--faint);
       letter-spacing: 2px; text-transform: lowercase;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.4);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.45);
     }
     .position-row {
       display: grid; grid-template-columns: 1.5fr 1fr 1fr 0.8fr 0.8fr;
       gap: 10px; padding: 12px 0;
       font-size: 13px; font-weight: 300;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.15);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.18);
       align-items: center;
     }
     .position-side { font-size: 12px; letter-spacing: 1.5px; text-transform: lowercase; }
@@ -413,13 +413,13 @@
       gap: 10px; padding: 10px 0;
       font-size: 10px; color: var(--faint);
       letter-spacing: 2px; text-transform: lowercase;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.4);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.45);
     }
     .pos-page-row {
       display: grid; grid-template-columns: 1.5fr 0.7fr 1.2fr 0.8fr 0.8fr 0.7fr auto auto;
       gap: 10px; padding: 14px 0;
       font-size: 13px; font-weight: 300;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.15);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.18);
       align-items: center;
     }
     .pos-page-row .pos-pool { color: var(--dim); }
@@ -435,7 +435,7 @@
     .pos-page-row .pos-status.closed { color: var(--faint); }
 
     .pos-fill-bar {
-      width: 100%; height: 4px; background: rgba(30, 45, 80, 0.3);
+      width: 100%; height: 4px; background: rgba(60, 50, 40, 0.35);
       border-radius: 2px; margin-top: 4px; overflow: hidden;
     }
     .pos-fill-bar-inner {
@@ -473,7 +473,7 @@
 
     .orbital { transition: stroke 0.3s ease, fill 0.3s ease; }
     .orbital.sub-active {
-      stroke: var(--bananas); fill: rgba(242, 214, 98, 0.15);
+      stroke: var(--bananas); fill: rgba(216, 180, 64, 0.15);
     }
     .orbital-sigil { transition: opacity 0.2s ease; }
 
@@ -484,7 +484,7 @@
 
     .monke-frame {
       position: relative;
-      border: 1px solid rgba(58, 90, 40, 0.35);
+      border: 1px solid rgba(90, 78, 60, 0.4);
       padding: 20px;
       margin-bottom: 16px;
     }
@@ -521,7 +521,7 @@
       background: linear-gradient(
         to bottom,
         var(--scaffold) 0%,
-        rgba(58, 90, 40, 0.2) 100%
+        rgba(90, 78, 60, 0.25) 100%
       );
     }
     .monke-detail-panel {
@@ -538,7 +538,7 @@
     .carousel-frame {
       flex: 1; aspect-ratio: 1; overflow: hidden;
       border: 1px solid var(--faint); position: relative;
-      background: rgba(30, 45, 80, 0.15);
+      background: rgba(60, 50, 40, 0.18);
     }
     .carousel-frame img {
       width: 100%; height: 100%; object-fit: cover; display: block;
@@ -546,7 +546,7 @@
     .carousel-frame .nft-gen-tag {
       position: absolute; bottom: 4px; right: 4px;
       font-size: 8px; letter-spacing: 1px;
-      padding: 1px 4px; background: rgba(15, 26, 58, 0.85);
+      padding: 1px 4px; background: rgba(17, 17, 24, 0.88);
     }
     .carousel-frame .nft-gen-tag.gen2 { color: var(--bananas); }
     .carousel-frame .nft-gen-tag.gen3 { color: var(--dim); }
@@ -563,12 +563,12 @@
     .nft-burn-info {
       position: absolute; top: 4px; left: 4px;
       font-size: 7px; letter-spacing: 0.5px; color: var(--fg);
-      padding: 1px 4px; background: rgba(15, 26, 58, 0.85);
+      padding: 1px 4px; background: rgba(17, 17, 24, 0.88);
     }
 
     .nft-selected-info {
       margin-top: 8px; padding-top: 8px;
-      border-top: 1px solid rgba(30, 45, 80, 0.3);
+      border-top: 1px solid rgba(60, 50, 40, 0.35);
     }
     .nft-selected-name { font-size: 12px; color: var(--fg); font-weight: 300; }
     .nft-selected-gen { font-size: 10px; color: var(--dim); letter-spacing: 1px; margin-top: 3px; }
@@ -581,17 +581,17 @@
       gap: 12px; padding: 8px 0;
       font-size: 10px; color: var(--faint);
       letter-spacing: 2px; text-transform: lowercase;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.4);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.45);
     }
     .monke-row {
       display: grid; grid-template-columns: 16px 1.5fr 0.8fr 1fr 1.2fr 0.8fr;
       gap: 12px; padding: 12px 0;
       font-size: 13px; font-weight: 300;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.15);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.18);
       align-items: center;
       cursor: pointer; transition: background 0.15s;
     }
-    .monke-row:hover { background: rgba(242, 214, 98, 0.03); }
+    .monke-row:hover { background: rgba(216, 180, 64, 0.03); }
     .monke-row .row-chevron {
       font-size: 10px; color: transparent; transition: color 0.2s;
     }
@@ -628,7 +628,7 @@
     .burn-btn {
       display: flex; align-items: center; justify-content: center;
       background: transparent;
-      border: 2px solid rgba(242, 214, 98, 0.35);
+      border: 2px solid rgba(216, 180, 64, 0.35);
       cursor: pointer; font-family: inherit;
       transition: all 0.3s; padding: 0;
       position: relative; overflow: hidden;
@@ -637,7 +637,7 @@
     }
     .burn-btn:hover {
       border-color: var(--bananas);
-      background: rgba(242, 214, 98, 0.06);
+      background: rgba(216, 180, 64, 0.06);
     }
     .burn-btn canvas {
       display: block; image-rendering: pixelated;
@@ -678,13 +678,13 @@
       gap: 12px; padding: 8px 0;
       font-size: 10px; color: var(--faint);
       letter-spacing: 2px; text-transform: lowercase;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.4);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.45);
     }
     .bounty-row {
       display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 0.8fr;
       gap: 12px; padding: 12px 0;
       font-size: 13px; font-weight: 300;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.15);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.18);
       align-items: center;
     }
     .bounty-row .reward { color: var(--mint); }
@@ -699,7 +699,7 @@
     }
     .activity-feed {
       max-height: 200px; overflow-y: auto;
-      border: 1px solid rgba(30, 45, 80, 0.2);
+      border: 1px solid rgba(60, 50, 40, 0.25);
       padding: 8px;
     }
     .activity-feed::-webkit-scrollbar { width: 2px; }
@@ -707,7 +707,7 @@
     .activity-feed::-webkit-scrollbar-thumb { background: var(--faint); }
     .feed-event {
       font-size: 12px; font-weight: 300; color: var(--dim);
-      padding: 6px 0; border-bottom: 1px solid rgba(30, 45, 80, 0.1);
+      padding: 6px 0; border-bottom: 1px solid rgba(60, 50, 40, 0.12);
       letter-spacing: 0.3px;
     }
     .feed-event .event-type { color: var(--mint); }
@@ -719,7 +719,7 @@
     /* ─── RECON: TOP 5 ANALYTICS CARDS ─── */
 
     .recon-card {
-      border: 1px solid rgba(30, 45, 80, 0.3);
+      border: 1px solid rgba(60, 50, 40, 0.35);
       padding: 16px; margin-bottom: 12px;
     }
     .recon-card.top5 { border-color: var(--bananas); }
@@ -772,13 +772,13 @@
       gap: 12px; padding: 8px 0;
       font-size: 10px; color: var(--faint);
       letter-spacing: 2px; text-transform: lowercase;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.4);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.45);
     }
     .rover-row {
       display: grid; grid-template-columns: 0.5fr 2fr 1.5fr 1fr;
       gap: 12px; padding: 12px 0;
       font-size: 13px; font-weight: 300;
-      border-bottom: 1px solid rgba(30, 45, 80, 0.15);
+      border-bottom: 1px solid rgba(60, 50, 40, 0.18);
       align-items: center;
     }
     .rover-row .rank { color: var(--dim); }
@@ -793,7 +793,7 @@
 
     .modal-overlay {
       position: fixed; inset: 0;
-      background: rgba(15, 26, 58, 0.85);
+      background: rgba(17, 17, 24, 0.88);
       backdrop-filter: blur(20px);
       z-index: 500; display: none;
       align-items: center; justify-content: center;
@@ -824,7 +824,7 @@
 
     .toast {
       position: fixed; bottom: 120px; right: 120px;
-      background: rgba(15, 26, 58, 0.9);
+      background: rgba(17, 17, 24, 0.92);
       border: 1px solid var(--faint);
       color: var(--fg); padding: 10px 22px;
       font-size: 12px; font-weight: 300; letter-spacing: 1px;
@@ -853,7 +853,7 @@
 /* Codec modal — MGS-style comms screen */
 .codec {
   position: relative;
-  background: #0a1a0a;
+  background: #0E0E0A;
   border: 2px solid var(--scaffold);
   max-width: 900px; width: 94%;
   overflow: hidden;
@@ -872,7 +872,7 @@
 .codec-header {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(58, 90, 40, 0.5);
+  border-bottom: 1px solid rgba(90, 78, 60, 0.55);
   position: relative; z-index: 2;
 }
 .codec-freq {
@@ -913,7 +913,7 @@
 .codec-dialogue {
   flex: 1;
   font-size: 13px; font-weight: 300;
-  color: #8aab8a;
+  color: #90A888;
   line-height: 2; letter-spacing: 0.4px;
 }
 .codec-dialogue p { margin-bottom: 12px; }

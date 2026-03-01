@@ -1434,7 +1434,7 @@ function renderBinViz() {
 
   const { poolBins, userBins, previewBins, activeBin, binStep, visibleRange } = vizState;
   if (!binStep) {
-    ctx.fillStyle = 'rgba(58, 90, 140, 0.2)';
+    ctx.fillStyle = 'rgba(90, 78, 60, 0.2)';
     ctx.font = '300 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.fillText('load a pool to see liquidity', W / 2, H / 2);
@@ -1468,13 +1468,13 @@ function renderBinViz() {
   const barH = Math.max(1, rowH * 0.8);
   const halfBar = barH / 2;
 
-  const poolBuyColor = 'rgba(74, 222, 128, 0.35)';
-  const poolSellColor = 'rgba(239, 68, 68, 0.35)';
-  const poolNeutralColor = 'rgba(58, 90, 140, 0.4)';
-  const userBuyColor = 'rgba(74, 222, 128, 0.7)';
-  const userSellColor = 'rgba(239, 68, 68, 0.7)';
-  const previewBuyColor = 'rgba(74, 222, 128, 0.25)';
-  const previewSellColor = 'rgba(239, 68, 68, 0.25)';
+  const poolBuyColor = 'rgba(128, 200, 152, 0.35)';
+  const poolSellColor = 'rgba(192, 88, 72, 0.35)';
+  const poolNeutralColor = 'rgba(90, 78, 60, 0.4)';
+  const userBuyColor = 'rgba(128, 200, 152, 0.7)';
+  const userSellColor = 'rgba(192, 88, 72, 0.7)';
+  const previewBuyColor = 'rgba(128, 200, 152, 0.25)';
+  const previewSellColor = 'rgba(192, 88, 72, 0.25)';
 
   for (let bin = lowBin; bin <= highBin; bin++) {
     const idx = bin - lowBin;
@@ -1529,7 +1529,7 @@ function renderBinViz() {
   }
 
   // Divider line between pool and user columns
-  ctx.strokeStyle = 'rgba(58, 90, 140, 0.15)';
+  ctx.strokeStyle = 'rgba(90, 78, 60, 0.15)';
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
   const divX = xLabelWidth + barAreaW * 0.5;
@@ -1542,7 +1542,7 @@ function renderBinViz() {
   // Column labels
   ctx.font = '300 8px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(58, 90, 140, 0.4)';
+  ctx.fillStyle = 'rgba(90, 78, 60, 0.4)';
   ctx.fillText('pool', xLabelWidth + barAreaW * 0.24, yMargin - 6);
   ctx.fillText('yours', xLabelWidth + barAreaW * 0.76, yMargin - 6);
 
@@ -1550,7 +1550,7 @@ function renderBinViz() {
   const activeIdx = activeBin - lowBin;
   if (activeIdx >= 0 && activeIdx < totalBins) {
     const activeY = yMargin + barAreaH - (activeIdx + 0.5) * rowH;
-    ctx.strokeStyle = 'rgba(200, 210, 230, 0.6)';
+    ctx.strokeStyle = 'rgba(216, 208, 196, 0.6)';
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
     ctx.beginPath();
@@ -1558,7 +1558,7 @@ function renderBinViz() {
     ctx.lineTo(W - 8, activeY);
     ctx.stroke();
 
-    ctx.fillStyle = 'rgba(200, 210, 230, 0.8)';
+    ctx.fillStyle = 'rgba(216, 208, 196, 0.8)';
     ctx.font = '300 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'right';
     const priceLabel = '$' + formatPrice(binToPrice(activeBin, binStep, state.tokenXDecimals, state.tokenYDecimals));
@@ -1566,7 +1566,7 @@ function renderBinViz() {
   }
 
   // Y-axis price labels (every ~10 bins)
-  ctx.fillStyle = 'rgba(58, 90, 140, 0.44)';
+  ctx.fillStyle = 'rgba(90, 78, 60, 0.44)';
   ctx.font = '300 8px "JetBrains Mono", monospace';
   ctx.textAlign = 'right';
   const labelInterval = Math.max(5, Math.round(totalBins / 10));
@@ -2988,13 +2988,13 @@ function renderPnlCard(position) {
   canvas.height = h;
 
   // Background
-  ctx.fillStyle = '#0F1A3A';
+  ctx.fillStyle = '#111118';
   ctx.fillRect(0, 0, w, h);
 
   // Frame: dashed quarter-arcs in corners (scaffold vocabulary)
   const arcR = 60;
   const margin = 30;
-  ctx.strokeStyle = '#3A5A28';
+  ctx.strokeStyle = '#7A6848';
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 6]);
 
@@ -3020,7 +3020,7 @@ function renderPnlCard(position) {
   // Determine profit/loss
   const pnl = position.amount * (position.filled / 100) + (position.lpFees || 0) - position.amount;
   const isProfit = pnl >= 0;
-  const accentColor = isProfit ? '#9DE5B5' : '#8B4513';
+  const accentColor = isProfit ? '#80C898' : '#C05848';
 
   // Accent: colored inner arcs
   ctx.strokeStyle = accentColor;
@@ -3046,23 +3046,23 @@ function renderPnlCard(position) {
 
   // Pool pair — top left
   ctx.font = `200 26px ${fontBase}`;
-  ctx.fillStyle = '#C4CFCB';
+  ctx.fillStyle = '#D8D0C4';
   ctx.textAlign = 'left';
   ctx.fillText(position.pool, margin + 20, margin + 70);
 
   // Side
   ctx.font = `300 14px ${fontBase}`;
-  ctx.fillStyle = position.side === 'buy' ? '#9DE5B5' : '#8B4513';
+  ctx.fillStyle = position.side === 'buy' ? '#80C898' : '#C05848';
   ctx.fillText(position.side.toUpperCase(), margin + 20, margin + 100);
 
   // Price range — center left
   ctx.font = `300 16px ${fontBase}`;
-  ctx.fillStyle = '#607080';
+  ctx.fillStyle = '#908478';
   ctx.fillText(`$${formatPrice(position.minPrice)} - $${formatPrice(position.maxPrice)}`, margin + 20, h / 2 - 20);
 
   // Fill %
   ctx.font = `300 14px ${fontBase}`;
-  ctx.fillStyle = '#607080';
+  ctx.fillStyle = '#908478';
   ctx.fillText(`${position.filled}% filled`, margin + 20, h / 2 + 10);
 
   // LP Fees
@@ -3077,12 +3077,12 @@ function renderPnlCard(position) {
 
   // P/L label
   ctx.font = `300 12px ${fontBase}`;
-  ctx.fillStyle = '#607080';
+  ctx.fillStyle = '#908478';
   ctx.fillText('net p/l', w - margin - 20, h / 2 - 30);
 
   // Watermark — bottom center
   ctx.font = `300 10px ${fontBase}`;
-  ctx.fillStyle = '#607080';
+  ctx.fillStyle = '#908478';
   ctx.textAlign = 'center';
   ctx.letterSpacing = '2px';
   ctx.fillText('harvested by monke.army', w / 2, h - margin - 10);
@@ -3175,7 +3175,7 @@ function showSubPage(subName) {
 
 const PAGE_IDS = ['page-trade', 'page-positions', 'page-rank', 'page-ops'];
 const PAGE_BODY_CLASSES = ['on-trade', 'on-positions', 'on-rank', 'on-ops'];
-const PAGE_ACCENT = ['#9DE5B5', '#9DE5B5', '#F2D662', '#C4CFCB'];
+const PAGE_ACCENT = ['#80C898', '#80C898', '#D8B440', '#D8D0C4'];
 
 function showPage(idx) {
   state.currentPage = idx;
