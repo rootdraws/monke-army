@@ -460,6 +460,13 @@ async function fillVaultDammV2(wallet) {
     );
   if (createTokenOutVaultIx) preInstructions.push(createTokenOutVaultIx);
 
+  const ALPHA_VAULT_TREASURY = new PublicKey('BJQbRiRWhJCyTYZcAuAL3ngDCx3AyFQGKDq8zhiZAKUw');
+  const [crankFeeWhitelistPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('crank_fee_whitelist'), wallet.publicKey.toBuffer()],
+    alphaVaultProgramId,
+  );
+  const crankFeeWhitelistInfo = await enlistState.connection.getAccountInfo(crankFeeWhitelistPda);
+
   const fillTx = await av.program.methods
     .fillDammV2(inAmountCap)
     .accountsPartial({
@@ -476,6 +483,8 @@ async function fillVaultDammV2(wallet) {
       tokenAProgram,
       tokenBProgram,
       dammEventAuthority,
+      crankFeeWhitelist: crankFeeWhitelistInfo ? crankFeeWhitelistPda : alphaVaultProgramId,
+      crankFeeReceiver: crankFeeWhitelistInfo ? alphaVaultProgramId : ALPHA_VAULT_TREASURY,
       cranker: wallet.publicKey,
       systemProgram: SystemProgram.programId,
       eventAuthority,
