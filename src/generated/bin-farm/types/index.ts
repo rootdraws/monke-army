@@ -14,7 +14,6 @@ export * from './feeAppliedEvent';
 export * from './feeChangeCancelledEvent';
 export * from './feeChangeProposedEvent';
 export * from './harvestEvent';
-export * from './poolFeesClaimedEvent';
 export * from './positionOpenedEvent';
 export * from './roverOpenedEvent';
 export * from './roverSweptEvent';

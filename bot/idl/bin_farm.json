@@ -590,98 +590,6 @@
       "args": []
     },
     {
-      "name": "claim_pool_fees",
-      "docs": [
-        "Claim accumulated trading fees from a DAMM v2 pool position held by rover_authority.",
-        "Fees (SOL via collectFeeMode=1) land in rover_authority's token accounts.",
-        "sweep_rover then moves SOL to the Splitter vault for distribution.",
-        "",
-        "Permissionless — anyone can crank. The bot calls this as step 1 of the Saturday cycle.",
-        "Uses remaining_accounts for the DAMM v2 CPI accounts (flexible, no recompile on changes).",
-        "",
-        "Expected remaining_accounts layout (all from DAMM v2 pool state):",
-        "[0]  pool (mut)",
-        "[1]  position (mut)",
-        "[2]  position_nft_account",
-        "[3]  token_a_vault (mut) — pool's token A vault",
-        "[4]  token_b_vault (mut) — pool's token B vault",
-        "[5]  token_a_mint",
-        "[6]  token_b_mint",
-        "[7]  rover_token_a (mut) — rover_authority's ATA for token A",
-        "[8]  rover_token_b (mut) — rover_authority's ATA for token B (SOL/wSOL)",
-        "[9]  token_a_program",
-        "[10] token_b_program",
-        "[11] memo_program",
-        "[12] damm_v2_program"
-      ],
-      "discriminator": [
-        33,
-        187,
-        125,
-        186,
-        41,
-        247,
-        236,
-        89
-      ],
-      "accounts": [
-        {
-          "name": "caller",
-          "docs": [
-            "Anyone can crank this instruction"
-          ],
-          "signer": true
-        },
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "rover_authority",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  118,
-                  101,
-                  114,
-                  95,
-                  97,
-                  117,
-                  116,
-                  104,
-                  111,
-                  114,
-                  105,
-                  116,
-                  121
-                ]
-              }
-            ]
-          }
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "close_position",
       "docs": [
         "Bot closes position: remove all + claim fees + close Meteora position."
@@ -2710,19 +2618,6 @@
       ]
     },
     {
-      "name": "PoolFeesClaimedEvent",
-      "discriminator": [
-        69,
-        212,
-        165,
-        250,
-        85,
-        35,
-        75,
-        73
-      ]
-    },
-    {
       "name": "PositionOpenedEvent",
       "discriminator": [
         163,
@@ -3224,18 +3119,6 @@
           {
             "name": "total_harvested",
             "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "PoolFeesClaimedEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "timestamp",
-            "type": "i64"
           }
         ]
       }

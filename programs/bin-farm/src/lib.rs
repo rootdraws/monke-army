@@ -37,14 +37,6 @@ pub const MIN_ROVER_BIN_STEP: u16 = 20;
 pub const TOKEN_2022_PROGRAM_ID: Pubkey =
     solana_program::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
-/// Meteora DAMM v2 program ID (for claim_pool_fees CPI)
-pub const DAMM_V2_PROGRAM_ID: Pubkey =
-    solana_program::pubkey!("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
-
-/// DAMM v2 claim_position_fee discriminator — SHA256("global:claim_position_fee")[0..8]
-/// Hardcoded to avoid runtime hash computation and ensure correctness.
-pub const DAMM_V2_CLAIM_FEE_DISC: [u8; 8] = [0xb4, 0x26, 0x9a, 0x11, 0x85, 0x21, 0xa2, 0xd3];
-
 #[program]
 pub mod bin_farm {
     use super::*;
@@ -1652,146 +1644,6 @@ pub mod bin_farm {
         msg!("Fee rover opened: {} bins [{},{}] amount={}", width, min_bin_id, max_bin_id, amount);
         Ok(())
     }
-
-    // ============ DAMM v2 POOL FEE CLAIMING ============
-
-    /// Claim accumulated trading fees from a DAMM v2 pool position held by rover_authority.
-    /// Fees (SOL via collectFeeMode=1) land in rover_authority's token accounts.
-    /// sweep_rover then moves SOL to the Splitter vault for distribution.
-    ///
-    /// Permissionless — anyone can crank. The bot calls this as step 1 of the Saturday cycle.
-    /// Uses remaining_accounts for the DAMM v2 CPI accounts (flexible, no recompile on changes).
-    ///
-    /// Expected remaining_accounts layout (all from DAMM v2 pool state):
-    ///   [0]  pool (mut)
-    ///   [1]  position (mut)
-    ///   [2]  position_nft_account
-    ///   [3]  token_a_vault (mut) — pool's token A vault
-    ///   [4]  token_b_vault (mut) — pool's token B vault
-    ///   [5]  token_a_mint
-    ///   [6]  token_b_mint
-    ///   [7]  rover_token_a (mut) — rover_authority's ATA for token A
-    ///   [8]  rover_token_b (mut) — rover_authority's ATA for token B (SOL/wSOL)
-    ///   [9]  token_a_program
-    ///   [10] token_b_program
-    ///   [11] memo_program
-    ///   [12] damm_v2_program
-    pub fn claim_pool_fees<'a>(ctx: Context<'_, '_, 'a, 'a, ClaimPoolFees<'a>>) -> Result<()> {
-        require!(ctx.remaining_accounts.len() >= 13, CoreError::NoBinsProvided);
-
-        let damm_v2_program = &ctx.remaining_accounts[12];
-
-        // Validate the DAMM v2 program ID
-        require!(
-            damm_v2_program.key() == DAMM_V2_PROGRAM_ID,
-            CoreError::InvalidProgram
-        );
-
-        // Validate rover ATAs are owned by rover_authority — prevents fee redirection
-        for idx in [7usize, 8] {
-            let ata_info = &ctx.remaining_accounts[idx];
-            let ata_data = ata_info.try_borrow_data()?;
-            require!(ata_data.len() >= 64, CoreError::InvalidTokenOwner);
-            let ata_owner = Pubkey::try_from(&ata_data[32..64])
-                .map_err(|_| CoreError::InvalidTokenOwner)?;
-            require!(ata_owner == ctx.accounts.rover_authority.key(), CoreError::InvalidTokenOwner);
-        }
-
-        // Build the DAMM v2 claimPositionFee instruction
-        let mut data = Vec::with_capacity(8);
-        data.extend_from_slice(&DAMM_V2_CLAIM_FEE_DISC);
-
-        let accounts_meta = vec![
-            // position_nft_account owner (rover_authority) — signer
-            solana_program::instruction::AccountMeta::new_readonly(
-                ctx.accounts.rover_authority.key(), true,
-            ),
-            // pool
-            solana_program::instruction::AccountMeta::new(
-                ctx.remaining_accounts[0].key(), false,
-            ),
-            // position
-            solana_program::instruction::AccountMeta::new(
-                ctx.remaining_accounts[1].key(), false,
-            ),
-            // position_nft_account
-            solana_program::instruction::AccountMeta::new_readonly(
-                ctx.remaining_accounts[2].key(), false,
-            ),
-            // token_a_vault (pool's)
-            solana_program::instruction::AccountMeta::new(
-                ctx.remaining_accounts[3].key(), false,
-            ),
-            // token_b_vault (pool's)
-            solana_program::instruction::AccountMeta::new(
-                ctx.remaining_accounts[4].key(), false,
-            ),
-            // token_a_mint
-            solana_program::instruction::AccountMeta::new_readonly(
-                ctx.remaining_accounts[5].key(), false,
-            ),
-            // token_b_mint
-            solana_program::instruction::AccountMeta::new_readonly(
-                ctx.remaining_accounts[6].key(), false,
-            ),
-            // user_token_a (rover_authority's ATA)
-            solana_program::instruction::AccountMeta::new(
-                ctx.remaining_accounts[7].key(), false,
-            ),
-            // user_token_b (rover_authority's ATA)
-            solana_program::instruction::AccountMeta::new(
-                ctx.remaining_accounts[8].key(), false,
-            ),
-            // token_a_program
-            solana_program::instruction::AccountMeta::new_readonly(
-                ctx.remaining_accounts[9].key(), false,
-            ),
-            // token_b_program
-            solana_program::instruction::AccountMeta::new_readonly(
-                ctx.remaining_accounts[10].key(), false,
-            ),
-            // memo_program
-            solana_program::instruction::AccountMeta::new_readonly(
-                ctx.remaining_accounts[11].key(), false,
-            ),
-        ];
-
-        let ix = solana_program::instruction::Instruction {
-            program_id: DAMM_V2_PROGRAM_ID,
-            accounts: accounts_meta,
-            data,
-        };
-
-        let signer_seeds: &[&[u8]] = &[b"rover_authority", &[ctx.accounts.rover_authority.bump]];
-
-        solana_program::program::invoke_signed(
-            &ix,
-            &[
-                ctx.accounts.rover_authority.to_account_info(),
-                ctx.remaining_accounts[0].clone(),  // pool
-                ctx.remaining_accounts[1].clone(),  // position
-                ctx.remaining_accounts[2].clone(),  // position_nft_account
-                ctx.remaining_accounts[3].clone(),  // token_a_vault
-                ctx.remaining_accounts[4].clone(),  // token_b_vault
-                ctx.remaining_accounts[5].clone(),  // token_a_mint
-                ctx.remaining_accounts[6].clone(),  // token_b_mint
-                ctx.remaining_accounts[7].clone(),  // rover_token_a
-                ctx.remaining_accounts[8].clone(),  // rover_token_b
-                ctx.remaining_accounts[9].clone(),  // token_a_program
-                ctx.remaining_accounts[10].clone(), // token_b_program
-                ctx.remaining_accounts[11].clone(), // memo_program
-                ctx.remaining_accounts[12].clone(), // damm_v2_program
-            ],
-            &[signer_seeds],
-        )?;
-
-        emit!(PoolFeesClaimedEvent {
-            timestamp: Clock::get()?.unix_timestamp,
-        });
-
-        msg!("DAMM v2 pool fees claimed to rover_authority");
-        Ok(())
-    }
 }
 
 /// Prepend a memo CPI before token transfers. Satisfies the Memo Transfer extension
@@ -3010,24 +2862,6 @@ pub struct OpenFeeRover<'info> {
     // to fit within BPF 4KB stack frame with 2 init accounts
 }
 
-/// Claim trading fees from a DAMM v2 pool position held by rover_authority.
-/// Permissionless — anyone can crank. DAMM v2 accounts passed via remaining_accounts.
-#[derive(Accounts)]
-pub struct ClaimPoolFees<'info> {
-    /// Anyone can crank this instruction
-    pub caller: Signer<'info>,
-
-    #[account(seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
-
-    #[account(
-        mut,
-        seeds = [b"rover_authority"],
-        bump = rover_authority.bump
-    )]
-    pub rover_authority: Account<'info, RoverAuthority>,
-}
-
 // ============ ROVER EVENTS ============
 
 #[event]
@@ -3051,11 +2885,6 @@ pub struct RoverSweptEvent {
     pub operator_share: u64,
     pub dist_pool: Pubkey,
     pub bot: Pubkey,
-    pub timestamp: i64,
-}
-
-#[event]
-pub struct PoolFeesClaimedEvent {
     pub timestamp: i64,
 }
 

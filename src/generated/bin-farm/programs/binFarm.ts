@@ -23,7 +23,6 @@ import {
   type ParsedCancelPendingFeeInstruction,
   type ParsedCancelPendingRevenueDestInstruction,
   type ParsedClaimFeesInstruction,
-  type ParsedClaimPoolFeesInstruction,
   type ParsedClosePositionInstruction,
   type ParsedCloseRoverTokenAccountInstruction,
   type ParsedHarvestBinsInstruction,
@@ -118,7 +117,6 @@ export enum BinFarmInstruction {
   CancelPendingFee,
   CancelPendingRevenueDest,
   ClaimFees,
-  ClaimPoolFees,
   ClosePosition,
   CloseRoverTokenAccount,
   HarvestBins,
@@ -242,17 +240,6 @@ export function identifyBinFarmInstruction(
     )
   ) {
     return BinFarmInstruction.ClaimFees;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([33, 187, 125, 186, 41, 247, 236, 89])
-      ),
-      0
-    )
-  ) {
-    return BinFarmInstruction.ClaimPoolFees;
   }
   if (
     containsBytes(
@@ -498,9 +485,6 @@ export type ParsedBinFarmInstruction<
   | ({
       instructionType: BinFarmInstruction.ClaimFees;
     } & ParsedClaimFeesInstruction<TProgram>)
-  | ({
-      instructionType: BinFarmInstruction.ClaimPoolFees;
-    } & ParsedClaimPoolFeesInstruction<TProgram>)
   | ({
       instructionType: BinFarmInstruction.ClosePosition;
     } & ParsedClosePositionInstruction<TProgram>)

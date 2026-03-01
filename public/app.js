@@ -86,8 +86,20 @@ function asSigner(pubkeyOrAddress) {
   };
 }
 
-/** Sign + send: tx goes to Phantom clean (no pre-compilation, no mutation). */
+/** Pre-simulate tx with sigVerify:false before presenting to Phantom.
+ *  Catches on-chain failures early — failed simulations trigger Lighthouse warnings. */
+async function preSimulate(tx) {
+  const sim = await state.connection.simulateTransaction(tx);
+  if (sim.value.err) {
+    const errStr = JSON.stringify(sim.value.err);
+    if (CONFIG.DEBUG) console.error('[monke] Pre-simulation failed:', errStr, sim.value.logs);
+    throw new Error('Transaction would fail on-chain: ' + errStr);
+  }
+}
+
+/** Sign + send: pre-simulate, then present to Phantom clean. */
 async function walletSendTransaction(tx, options = {}) {
+  await preSimulate(tx);
   const signed = await state.wallet.signTransaction(tx);
   return await state.connection.sendRawTransaction(signed.serialize(), options);
 }
@@ -1772,6 +1784,7 @@ async function createPosition() {
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
+    await preSimulate(tx);
     showToast('Approve in wallet...', 'info');
     const signed = await state.wallet.signTransaction(tx);
     signed.partialSign(meteoraPositionKeypair);

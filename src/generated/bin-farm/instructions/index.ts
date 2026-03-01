@@ -15,7 +15,6 @@ export * from './botUnpause';
 export * from './cancelPendingFee';
 export * from './cancelPendingRevenueDest';
 export * from './claimFees';
-export * from './claimPoolFees';
 export * from './closePosition';
 export * from './closeRoverTokenAccount';
 export * from './harvestBins';
