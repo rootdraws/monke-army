@@ -849,65 +849,6 @@
 /* ═══ ENLIST PAGE ═══ */
 
 
-/* Compact inline countdown — sits on one line */
-.enlist-countdown {
-  display: flex; align-items: baseline; gap: 12px;
-  margin-bottom: 16px;
-}
-.countdown-inline {
-  font-size: 14px; font-weight: 200; color: var(--bananas);
-  font-variant-numeric: tabular-nums; letter-spacing: 1px;
-}
-.countdown-inline span {
-  font-weight: 300; color: var(--bananas);
-}
-
-/* Mint address line */
-.enlist-mint-line {
-  display: flex; align-items: baseline; gap: 12px;
-  margin-bottom: 16px;
-}
-
-/* Deposit Form — left-aligned, scaffold vocabulary */
-.enlist-deposit-form { margin: 16px 0; }
-
-.deposit-input-row {
-  display: flex; gap: 8px; margin-bottom: 4px;
-}
-
-.deposit-input {
-  flex: 1; max-width: 240px;
-  background: transparent;
-  border: none; border-bottom: 1px solid var(--faint);
-  color: var(--fg);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 14px; font-weight: 200;
-  padding: 6px 0; outline: none;
-  transition: border-color 0.2s; letter-spacing: 1px;
-}
-.deposit-input:focus { border-bottom-color: var(--dim); }
-.deposit-input::placeholder { color: var(--faint); }
-.deposit-input::-webkit-outer-spin-button,
-.deposit-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.deposit-input { -moz-appearance: textfield; appearance: textfield; }
-
-.deposit-balance {
-  font-size: 11px; font-weight: 300; color: var(--dim);
-  margin-bottom: 12px;
-}
-
-/* Help button — top right of enlist page body */
-.enlist-help-btn {
-  position: absolute; top: 0; right: 0;
-  width: 22px; height: 22px;
-  background: transparent; border: 1px solid var(--faint);
-  border-radius: 50%; color: var(--dim);
-  font-size: 11px; font-weight: 300; font-family: inherit;
-  cursor: pointer; transition: all 0.2s;
-  display: flex; align-items: center; justify-content: center;
-  line-height: 1;
-}
-.enlist-help-btn:hover { border-color: var(--bananas); color: var(--bananas); }
 
 /* Codec modal — MGS-style comms screen */
 .codec {
@@ -978,42 +919,3 @@
 .codec-dialogue p { margin-bottom: 12px; }
 .codec-accent { color: var(--mint); font-weight: 400; }
 
-/* Curve estimate display */
-.enlist-estimate {
-  display: flex; gap: 24px; margin-bottom: 16px;
-  padding: 10px 0;
-  border-top: 1px solid rgba(30, 45, 80, 0.3);
-  border-bottom: 1px solid rgba(30, 45, 80, 0.3);
-}
-.enlist-estimate-row {
-  display: flex; flex-direction: column; gap: 2px;
-}
-.enlist-estimate .stat-value {
-  font-size: 13px;
-}
-
-/* Pro-rata explainer */
-.enlist-explainer {
-  font-size: 12px; font-weight: 300; color: var(--dim);
-  line-height: 1.8; letter-spacing: 0.3px;
-  margin-bottom: 20px; max-width: 480px;
-}
-
-/* Withdraw de-emphasized — small, faint, tucked under countdown */
-.enlist-secondary-actions {
-  margin-top: 12px;
-}
-.enlist-secondary-actions .enlist-withdraw {
-  opacity: 0.4; font-size: 8px; letter-spacing: 2px;
-  transition: opacity 0.2s;
-}
-.enlist-secondary-actions .enlist-withdraw:hover { opacity: 0.8; }
-
-/* Next step after claim */
-.enlist-next-step {
-  margin-top: 16px;
-  display: flex; align-items: center; gap: 12px;
-}
-.enlist-next-step .dim {
-  font-size: 10px; font-weight: 300; color: var(--dim);
-}

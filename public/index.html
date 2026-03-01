@@ -14,7 +14,7 @@
     crossorigin="anonymous"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body class="on-enlist">
+<body class="on-trade">
 
   <!-- GLOBAL SCAFFOLD: corners + outer tangent rays (always visible) -->
   <div class="tangent-ray top"></div>
@@ -77,122 +77,9 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       PAGE 0: ENLIST — Alpha Vault fair launch
-       Join the army. Deposit SOL. Everyone gets the same price.
+       PAGE 0: TRADE — full scaffold with order form + positions
        ═══════════════════════════════════════════════════════════ -->
-  <div class="site-page active" id="page-enlist">
-    <div class="page-body">
-
-      <button class="enlist-help-btn" id="enlistHelpBtn">?</button>
-
-      <!-- Phase 1: Pre-deposit countdown -->
-      <div class="enlist-phase" id="enlistPhaseCountdown">
-        <div class="stats-grid">
-          <div><div class="stat-label">init price</div><div class="stat-value">0.000001 SOL</div></div>
-          <div><div class="stat-label">max vault</div><div class="stat-value">420 SOL</div></div>
-          <div><div class="stat-label">supply</div><div class="stat-value">1B $BANANAS</div></div>
-          <div><div class="stat-label">dev allocation</div><div class="stat-value green">zero</div></div>
-        </div>
-
-        <div class="enlist-explainer">pro-rata fair launch. deposit SOL, everyone gets the same price. if total deposits exceed 420 SOL, your allocation is proportional to your share. 100% of supply enters the pool. zero dev tokens.</div>
-
-        <div class="enlist-countdown">
-          <span class="stat-label">vault opens in</span>
-          <span class="countdown-inline" id="enlistCountdown">
-            <span id="countdownDays">00</span>d
-            <span id="countdownHours">00</span>h
-            <span id="countdownMins">00</span>m
-            <span id="countdownSecs">00</span>s
-          </span>
-        </div>
-
-        <div class="enlist-mint-line">
-          <span class="stat-label">$BANANAS</span>
-          <span class="stat-value" id="enlistBananasAddress" style="font-size:9px;">—</span>
-        </div>
-        <div class="enlist-mint-line">
-          <span class="stat-label">pool</span>
-          <span class="stat-value" id="enlistPoolLink" style="font-size:9px;">—</span>
-        </div>
-
-        <button class="action-btn" id="enlistConnectBtn">connect wallet to enlist</button>
-        <div class="deposit-balance" id="enlistPhase1BalanceWrap" style="display:none; margin-top:8px;">wallet: <span id="enlistPhase1Balance">—</span> SOL</div>
-      </div>
-
-      <!-- Phase 2: Deposit open -->
-      <div class="enlist-phase" id="enlistPhaseDeposit" style="display:none;">
-        <div class="stats-grid">
-          <div><div class="stat-label">total deposited</div><div class="stat-value" id="enlistTotalDeposited">0 SOL</div></div>
-          <div><div class="stat-label">your deposit</div><div class="stat-value" id="enlistYourDeposit">0 SOL</div></div>
-          <div><div class="stat-label">your allocation</div><div class="stat-value green" id="enlistAllocation">—</div></div>
-          <div><div class="stat-label">vault capacity</div><div class="stat-value" id="enlistCapacity">0 / 420 SOL</div></div>
-        </div>
-
-        <div class="enlist-estimate">
-          <div class="enlist-estimate-row">
-            <span class="stat-label">est. entry price</span>
-            <span class="stat-value" id="enlistEstPrice">0.000001 SOL</span>
-          </div>
-          <div class="enlist-estimate-row">
-            <span class="stat-label">est. your tokens</span>
-            <span class="stat-value bananas" id="enlistEstTokens">—</span>
-          </div>
-          <div class="enlist-estimate-row">
-            <span class="stat-label">price impact</span>
-            <span class="stat-value" id="enlistPriceImpact">+0%</span>
-          </div>
-        </div>
-
-        <div class="enlist-deposit-form">
-          <div class="deposit-input-row">
-            <input type="number" class="deposit-input" id="enlistAmountInput" placeholder="SOL" step="0.1" min="0">
-            <button class="action-btn-sm" id="enlistMaxBtn">max</button>
-          </div>
-          <div class="deposit-balance">wallet: <span id="enlistWalletBalance">—</span> SOL</div>
-          <button class="action-btn" id="enlistDepositBtn">deposit SOL</button>
-        </div>
-
-        <div class="enlist-countdown">
-          <span class="stat-label">tokens drop in</span>
-          <span class="countdown-inline" id="enlistActivationCountdown">
-            <span id="activationDays">00</span>d
-            <span id="activationHours">00</span>h
-            <span id="activationMins">00</span>m
-            <span id="activationSecs">00</span>s
-          </span>
-        </div>
-
-        <div class="enlist-secondary-actions">
-          <button class="action-btn-sm enlist-withdraw" id="enlistWithdrawBtn" style="display:none;">withdraw</button>
-        </div>
-      </div>
-
-      <!-- Phase 3: Post-activation / Claim -->
-      <div class="enlist-phase" id="enlistPhaseClaim" style="display:none;">
-        <div class="stats-grid">
-          <div><div class="stat-label">your $BANANAS</div><div class="stat-value green" id="enlistBananasBalance">0</div></div>
-          <div><div class="stat-label">your deposit</div><div class="stat-value" id="enlistClaimDeposit">0 SOL</div></div>
-          <div><div class="stat-label">price</div><div class="stat-value" id="enlistCurrentPrice">—</div></div>
-          <div><div class="stat-label">pool liquidity</div><div class="stat-value" id="enlistPoolLiquidity">—</div></div>
-        </div>
-
-        <button class="action-btn" id="enlistClaimBtn">claim $bananas</button>
-        <div class="enlist-secondary-actions">
-          <button class="action-btn-sm enlist-withdraw" id="enlistRefundBtn" style="display:none;">withdraw excess SOL</button>
-        </div>
-        <div class="enlist-next-step">
-          <span class="dim">got your $BANANAS?</span>
-          <button class="action-btn-sm" id="enlistGoToRank">feed your monke →</button>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ═══════════════════════════════════════════════════════════
-       PAGE 1: TRADE — full scaffold with order form + positions
-       ═══════════════════════════════════════════════════════════ -->
-  <div class="site-page" id="page-trade">
+  <div class="site-page active" id="page-trade">
 
     <div class="trade-layout">
       <!-- LEFT: Bin Visualization -->
@@ -263,7 +150,7 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       PAGE 2: POSITIONS — all wallet positions across all pools
+       PAGE 1: POSITIONS — all wallet positions across all pools
        ═══════════════════════════════════════════════════════════ -->
   <div class="site-page" id="page-positions">
     <div class="page-body">
@@ -282,7 +169,7 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       PAGE 3: RANK — feed your monke, claim SOL
+       PAGE 2: RANK — feed your monke, claim SOL
        Sub-pages: Monke (personal) + Roster (leaderboard)
        ═══════════════════════════════════════════════════════════ -->
   <div class="site-page" id="page-rank">
@@ -376,7 +263,7 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       PAGE 4: OPS — the war room
+       PAGE 3: OPS — the war room
        Activity feed + bounty board + permissionless crank
        ═══════════════════════════════════════════════════════════ -->
   <div class="site-page" id="page-ops">
@@ -451,12 +338,10 @@
       <ellipse class="sigil-orbit" data-page="1" cx="100" cy="10" rx="87" ry="51" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
       <ellipse class="sigil-orbit" data-page="2" cx="100" cy="10" rx="77" ry="45" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
       <ellipse class="sigil-orbit" data-page="3" cx="100" cy="8" rx="66" ry="38" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <ellipse class="sigil-orbit" data-page="4" cx="100" cy="6" rx="54" ry="31" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
       <circle class="sigil-dot" data-page="0" cx="100" cy="67" r="2.5" fill="var(--faint)"/>
       <circle class="sigil-dot" data-page="1" cx="100" cy="61" r="2.5" fill="var(--faint)"/>
       <circle class="sigil-dot" data-page="2" cx="100" cy="55" r="2.5" fill="var(--faint)"/>
       <circle class="sigil-dot" data-page="3" cx="100" cy="46" r="2.5" fill="var(--faint)"/>
-      <circle class="sigil-dot" data-page="4" cx="100" cy="37" r="2.5" fill="var(--faint)"/>
       <circle cx="100" cy="10" r="4" fill="none" stroke="var(--scaffold)" stroke-width="1"/>
       <circle cx="100" cy="10" r="1.5" fill="var(--scaffold)"/>
       <line x1="100" y1="14" x2="100" y2="77" stroke="var(--scaffold)" stroke-width="0.75"/>
@@ -500,37 +385,6 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="enlistHelpModal">
-    <div class="codec">
-      <div class="codec-scanlines"></div>
-      <div class="codec-header">
-        <span class="codec-freq">141.12</span>
-        <span class="codec-label">fair launch</span>
-        <button class="codec-close" id="enlistHelpClose">&times;</button>
-      </div>
-      <div class="codec-body">
-        <div class="codec-portrait">
-          <img src="monke.png" alt="monke">
-          <div class="codec-name">monke</div>
-        </div>
-        <div class="codec-dialogue">
-          <p>monke.army uses <a href="https://docs.meteora.ag/anti-sniper-suite/alpha-vault/what-is-alpha-vault" target="_blank" rel="noopener" style="color:var(--mint);text-decoration:none;">Meteora DAMM v2 Alpha Vault</a> for a fair launch.</p>
-          <p>1. Deposit SOL.</p>
-          <p>2. March 1st 00:00:00 UTC — Claim your $BANANAS.</p>
-          <p>3. Pro-Rata: everyone gets the same price.</p>
-          <p>4. Alpha Vault purchases up to 420 SOL off the DAMM v2 curve.</p>
-          <p>5. Any deposits above 420 SOL are refunded to your wallet.</p>
-          <p>6. Burn $BANANAS to your <a href="https://magiceden.us/marketplace/solana_monkey_business" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">SMB Gen2</a> or <a href="https://magiceden.us/marketplace/smb_gen3" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">SMB Gen3</a> Monke to earn fees.</p>
-          <br>
-          <p class="codec-accent">50% of protocol fees are returned to monke. 50% funds bot operations.</p>
-          <hr style="border:none;border-top:1px solid rgba(58,90,40,0.4);margin:12px 0;">
-          <p><a href="https://jup.ag/tokens/ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">$BANANAS</a> || CA: ABj8RJzGHxbLoB8JBea8kvBx626KwSfvbpce9xVfkK7w</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <script src="app.js"></script>
-  <script src="enlist.bundle.js"></script>
 </body>
 </html>

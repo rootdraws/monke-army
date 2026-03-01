@@ -56,7 +56,6 @@ async function loadConfig() {
   } catch {
     // Use hardcoded defaults (dev mode)
   }
-  // Expose CONFIG globally so enlist.js (bundled separately) can read it
   window.CONFIG = CONFIG;
 }
 
@@ -208,7 +207,7 @@ function handleRelayEvent(msg) {
     case 'positionChanged':
       addFeedEvent(formatRelayEvent(msg));
       refreshPositionsList();
-      if (state.currentPage === 2) renderPositionsPage();
+      if (state.currentPage === 1) renderPositionsPage();
       loadUserBins().then(() => renderBinViz());
       break;
 
@@ -851,7 +850,6 @@ async function connectWallet(walletId) {
       CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL, 'confirmed'
     );
 
-    // Bridge wallet state for enlist.js and other bundled modules
     window.__monkeWallet = { publicKey: pubkey, adapter: provider };
     window.dispatchEvent(new Event('monke:walletChanged'));
 
@@ -867,7 +865,6 @@ async function connectWallet(walletId) {
     refreshPositionsList();
     loadBinVizData();
     renderMonkeList();
-    updateEnlistBalance();
     updateFee();
   } catch (err) {
     console.error('Wallet connection failed:', err);
@@ -898,8 +895,6 @@ async function disconnectWallet() {
   showToast('Disconnected');
   updatePositionsList();
   renderMonkeList();
-  const p1Wrap = document.getElementById('enlistPhase1BalanceWrap');
-  if (p1Wrap) p1Wrap.style.display = 'none';
 }
 
 document.addEventListener('click', e => {
@@ -3178,9 +3173,9 @@ function showSubPage(subName) {
 // NAVIGATION — bottom panel tabs + dots
 // ============================================================
 
-const PAGE_IDS = ['page-enlist', 'page-trade', 'page-positions', 'page-rank', 'page-ops'];
-const PAGE_BODY_CLASSES = ['on-enlist', 'on-trade', 'on-positions', 'on-rank', 'on-ops'];
-const PAGE_ACCENT = ['#F2D662', '#9DE5B5', '#9DE5B5', '#F2D662', '#C4CFCB'];
+const PAGE_IDS = ['page-trade', 'page-positions', 'page-rank', 'page-ops'];
+const PAGE_BODY_CLASSES = ['on-trade', 'on-positions', 'on-rank', 'on-ops'];
+const PAGE_ACCENT = ['#9DE5B5', '#9DE5B5', '#F2D662', '#C4CFCB'];
 
 function showPage(idx) {
   state.currentPage = idx;
@@ -3282,198 +3277,11 @@ function showToast(msg, type = 'info') {
 window.showToast = showToast;
 
 // ============================================================
-// ENLIST CURVE ESTIMATION — DAMM v2 constant-product virtual reserves
-// ============================================================
-
-const CURVE = {
-  TOTAL_SUPPLY: 1_000_000_000,
-  INIT_PRICE: 0.000001,
-  get VIRTUAL_SOL() { return this.TOTAL_SUPPLY * this.INIT_PRICE; }, // 1000
-  get K() { return this.TOTAL_SUPPLY * this.VIRTUAL_SOL; },          // 1e12
-};
-
-function estimateVaultBuy(solDeposited) {
-  const effectiveSOL = Math.min(solDeposited, 420);
-  const newVSOL = CURVE.VIRTUAL_SOL + effectiveSOL;
-  const newTokens = CURVE.K / newVSOL;
-  const bought = CURVE.TOTAL_SUPPLY - newTokens;
-  const avgPrice = effectiveSOL / bought;
-  const pctSupply = (bought / CURVE.TOTAL_SUPPLY) * 100;
-  const priceImpact = ((avgPrice / CURVE.INIT_PRICE) - 1) * 100;
-  return { bought, avgPrice, pctSupply, priceImpact };
-}
-
-function updateEnlistEstimates(totalDepositSOL, userDepositSOL) {
-  const est = estimateVaultBuy(totalDepositSOL || 0);
-
-  const priceEl = document.getElementById('enlistEstPrice');
-  const tokensEl = document.getElementById('enlistEstTokens');
-  const impactEl = document.getElementById('enlistPriceImpact');
-
-  if (priceEl) priceEl.textContent = est.avgPrice > 0
-    ? est.avgPrice.toFixed(10) + ' SOL'
-    : CURVE.INIT_PRICE.toFixed(6) + ' SOL';
-
-  if (impactEl) {
-    const impact = isFinite(est.priceImpact) ? est.priceImpact : 0;
-    impactEl.textContent = '+' + impact.toFixed(1) + '%';
-    impactEl.style.color = impact > 20 ? 'var(--sell)' : 'var(--dim)';
-  }
-
-  if (tokensEl && userDepositSOL > 0 && totalDepositSOL > 0) {
-    const userShare = userDepositSOL / totalDepositSOL;
-    const userTokens = Math.floor(est.bought * userShare);
-    tokensEl.textContent = userTokens.toLocaleString() + ' $BANANAS';
-  } else if (tokensEl) {
-    tokensEl.textContent = '—';
-  }
-}
-
-// Expose so enlist.js bundle can call it after fetching vault stats
-window.updateEnlistEstimates = updateEnlistEstimates;
-
-// Static fallback — show init price before vault stats load
-updateEnlistEstimates(0, 0);
-
-// ============================================================
 // INITIALIZATION
 // ============================================================
 
-// ============================================================
-// ENLIST WALLET BALANCE (Phase 1 — before bundle loads deposit form)
-// ============================================================
-
-async function updateEnlistBalance() {
-  if (!state.connected || !state.connection || !state.publicKey) return;
-  try {
-    const balance = await state.connection.getBalance(state.publicKey);
-    const sol = (balance / 1e9).toFixed(4);
-    const wrap = document.getElementById('enlistPhase1BalanceWrap');
-    const el = document.getElementById('enlistPhase1Balance');
-    if (wrap) wrap.style.display = '';
-    if (el) el.textContent = sol;
-    // Also update Phase 2 element if it exists (covers enlist.js lag)
-    const el2 = document.getElementById('enlistWalletBalance');
-    if (el2) el2.textContent = sol;
-  } catch {}
-}
-
-// ============================================================
-// ENLIST COUNTDOWN (runs from app.js — no bundle dependency)
-// ============================================================
-
-async function initEnlistCountdown() {
-  const depositOpensAt = CONFIG.DEPOSIT_OPENS_AT || 0;
-  let activationPoint = CONFIG.ACTIVATION_POINT || 0;
-
-  // Read activation point from the Alpha Vault account on-chain
-  if (CONFIG.ALPHA_VAULT_ADDRESS) {
-    try {
-      const rpcUrl = CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL;
-      const conn = new solanaWeb3.Connection(rpcUrl, 'confirmed');
-      const vaultPubkey = new solanaWeb3.PublicKey(CONFIG.ALPHA_VAULT_ADDRESS);
-
-      // The vault stores the pool address at bytes 9-41 (after 8-byte discriminator + 1-byte poolType).
-      // We fetch the pool account and read activationPoint from it.
-      // But simpler: the DAMM v2 pool stores activationPoint as i64 at a known offset.
-      // The pool is in config. Read its activationPoint directly.
-      // DAMM v2 pool: activationPoint is i64 at byte offset 472
-      const poolPubkey = new solanaWeb3.PublicKey(CONFIG.DAMM_V2_POOL);
-      const poolInfo = await conn.getAccountInfo(poolPubkey);
-      if (poolInfo && poolInfo.data.length >= 480) {
-        const dv = new DataView(poolInfo.data.buffer, poolInfo.data.byteOffset);
-        const val = Number(dv.getBigInt64(472, true));
-        if (val > 1700000000 && val < 2000000000) {
-          activationPoint = val;
-          console.log('[enlist] Activation point from on-chain:', val, '=', new Date(val * 1000).toISOString());
-        }
-      }
-    } catch (err) {
-      console.warn('[enlist] On-chain activation read failed, using config fallback:', err.message);
-    }
-  }
-
-  function enlistPhase() {
-    const now = Math.floor(Date.now() / 1000);
-    if (depositOpensAt <= 0) return 'countdown';
-    if (now < depositOpensAt) return 'countdown';
-    if (activationPoint > 0 && now < activationPoint) return 'deposit';
-    if (activationPoint > 0) return 'claim';
-    return 'deposit';
-  }
-
-  function showEnlistPhase(phase) {
-    const ids = {
-      countdown: 'enlistPhaseCountdown',
-      deposit: 'enlistPhaseDeposit',
-      claim: 'enlistPhaseClaim',
-    };
-    Object.values(ids).forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
-    });
-    const active = document.getElementById(ids[phase]);
-    if (active) active.style.display = '';
-  }
-
-  function updateEnlistCountdown() {
-    const now = Math.floor(Date.now() / 1000);
-    const phase = enlistPhase();
-    showEnlistPhase(phase);
-
-    let target = 0;
-    if (phase === 'countdown') target = depositOpensAt;
-    else if (phase === 'deposit') target = activationPoint;
-    else return;
-
-    const diff = Math.max(0, target - now);
-    const days = Math.floor(diff / 86400);
-    const hours = Math.floor((diff % 86400) / 3600);
-    const mins = Math.floor((diff % 3600) / 60);
-    const secs = diff % 60;
-    const pad = (n) => String(n).padStart(2, '0');
-
-    if (phase === 'countdown') {
-      const el = (id) => document.getElementById(id);
-      if (el('countdownDays')) el('countdownDays').textContent = pad(days);
-      if (el('countdownHours')) el('countdownHours').textContent = pad(hours);
-      if (el('countdownMins')) el('countdownMins').textContent = pad(mins);
-      if (el('countdownSecs')) el('countdownSecs').textContent = pad(secs);
-    } else if (phase === 'deposit') {
-      const el = (id) => document.getElementById(id);
-      if (el('activationDays')) el('activationDays').textContent = pad(days);
-      if (el('activationHours')) el('activationHours').textContent = pad(hours);
-      if (el('activationMins')) el('activationMins').textContent = pad(mins);
-      if (el('activationSecs')) el('activationSecs').textContent = pad(secs);
-    }
-  }
-
-  // Show $BANANAS address
-  const addrEl = document.getElementById('enlistBananasAddress');
-  if (addrEl && CONFIG.BANANAS_MINT) {
-    const mint = CONFIG.BANANAS_MINT;
-    const short = mint.slice(0, 6) + '...' + mint.slice(-4);
-    addrEl.innerHTML = '<a href="https://solscan.io/token/' + mint + '" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">' + short + '</a>';
-  }
-
-  // Show DAMM v2 pool link
-  const poolLinkEl = document.getElementById('enlistPoolLink');
-  if (poolLinkEl && CONFIG.DAMM_V2_POOL) {
-    const pool = CONFIG.DAMM_V2_POOL;
-    const shortPool = pool.slice(0, 6) + '...' + pool.slice(-4);
-    poolLinkEl.innerHTML = '<a href="https://app.meteora.ag/pools/' + pool + '" target="_blank" rel="noopener" style="color:var(--mint);text-decoration:none;">' + shortPool + '</a> <span style="color:var(--dim);font-size:8px;">meteora</span>';
-  }
-
-  // Run immediately + every second
-  updateEnlistCountdown();
-  setInterval(updateEnlistCountdown, 1000);
-}
-
 async function init() {
   await loadConfig();
-
-  // Start enlist countdown immediately (no bundle needed)
-  initEnlistCountdown();
 
   // Connect to bot relay (LaserStream WebSocket + REST)
   connectRelay();
@@ -3546,18 +3354,6 @@ async function init() {
     if (state.currentPage < PAGE_IDS.length - 1) showPage(state.currentPage + 1);
   });
 
-  // Enlist page buttons
-  document.getElementById('enlistGoToRank')?.addEventListener('click', () => showPage(3));
-  document.getElementById('enlistConnectBtn')?.addEventListener('click', () => {
-    document.getElementById('connectWallet')?.click();
-  });
-  document.getElementById('enlistHelpBtn')?.addEventListener('click', () => {
-    document.getElementById('enlistHelpModal')?.classList.add('visible');
-  });
-  document.getElementById('enlistHelpClose')?.addEventListener('click', () => {
-    document.getElementById('enlistHelpModal')?.classList.remove('visible');
-  });
-
   // Arrow hover highlights target orbit
   const sigDots = document.querySelectorAll('.sigil-dot');
   const leftArrow = document.getElementById('navLeft');
@@ -3582,20 +3378,20 @@ async function init() {
   const orbitalArray = Array.from(orbitals);
   orbitals.forEach((o, i) => {
     o.addEventListener('click', () => {
-      if (state.currentPage === 3 && o.dataset.sub) {
+      if (state.currentPage === 2 && o.dataset.sub) {
         showSubPage(o.dataset.sub);
       }
     });
     // Reactive sigil on hover (Rank page)
     o.addEventListener('mouseenter', () => {
-      if (state.currentPage === 3 && o.dataset.sub) {
+      if (state.currentPage === 2 && o.dataset.sub) {
         document.querySelectorAll('.orbital-sigil').forEach(g => {
           g.setAttribute('opacity', g.dataset.sub === o.dataset.sub ? '1' : '0');
         });
       }
     });
     o.addEventListener('mouseleave', () => {
-      if (state.currentPage === 3) {
+      if (state.currentPage === 2) {
         document.querySelectorAll('.orbital-sigil').forEach(g => {
           g.setAttribute('opacity', g.dataset.sub === state.currentSubPage ? '0.4' : '0');
         });

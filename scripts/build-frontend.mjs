@@ -99,7 +99,6 @@ if (existsSync(enlistEntry)) {
 console.log('Processing index.html...');
 let html = readFileSync(join(publicDir, 'index.html'), 'utf-8');
 html = html.replace('src="app.js"', 'src="app.min.js"');
-html = html.replace('src="enlist.bundle.js"', 'src="enlist.bundle.js"'); // no change needed, already correct path
 writeFileSync(join(distDir, 'index.html'), html);
 
 // 4. Copy static assets
