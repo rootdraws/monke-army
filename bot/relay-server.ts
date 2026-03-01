@@ -14,12 +14,14 @@
  */
 
 import { IncomingMessage, ServerResponse } from 'http';
+import { Connection, PublicKey } from '@solana/web3.js';
 import WebSocket from 'ws';
 const WebSocketServer = WebSocket.Server;
 import type { Server as HttpServer } from 'http';
 import type { GeyserSubscriber, ActiveBinChangedEvent, HarvestJob, PositionChangedEvent } from './geyser-subscriber';
 import type { HarvestExecutor } from './harvest-executor';
 import type { MonkeKeeper } from './keeper';
+import { getDLMM } from './meteora-accounts';
 import { logger } from './logger';
 
 // ═══ TYPES ═══
@@ -71,6 +73,8 @@ export class RelayServer {
   private subscriber: GeyserSubscriber;
   private executor: HarvestExecutor;
   private keeper: MonkeKeeper;
+  private connection: Connection;
+  private coreProgramId: PublicKey;
   private botWalletProvider: (() => any) | null;
   private feeProvider: (() => Promise<FeePipelineState>) | null;
 
@@ -85,12 +89,16 @@ export class RelayServer {
     subscriber: GeyserSubscriber,
     executor: HarvestExecutor,
     keeper: MonkeKeeper,
+    connection: Connection,
+    coreProgramId: PublicKey,
     botWalletProvider?: () => any,
     feeProvider?: () => Promise<FeePipelineState>,
   ) {
     this.subscriber = subscriber;
     this.executor = executor;
     this.keeper = keeper;
+    this.connection = connection;
+    this.coreProgramId = coreProgramId;
     this.botWalletProvider = botWalletProvider ?? null;
     this.feeProvider = feeProvider ?? null;
   }
@@ -197,6 +205,9 @@ export class RelayServer {
           return this.handleBotWallet(res);
         case '/api/fees':
           this.handleFees(res);
+          return true;
+        case '/api/user-bins':
+          this.handleUserBins(url, res);
           return true;
         default:
           // Check for /api/pools/{address}
@@ -380,6 +391,76 @@ export class RelayServer {
     } catch (e: any) {
       logger.error(`[relay] Fee pipeline query error: ${e.message}`);
       this.json(res, 500, { error: 'Failed to query fee pipeline' });
+    }
+  }
+
+  /**
+   * GET /api/user-bins?pool=<lbPair>&owner=<pubkey>
+   * Returns real per-bin position amounts from the DLMM SDK.
+   */
+  private async handleUserBins(url: URL, res: ServerResponse): Promise<void> {
+    const poolParam = url.searchParams.get('pool');
+    const ownerParam = url.searchParams.get('owner');
+    if (!poolParam || !ownerParam) {
+      this.json(res, 400, { error: 'Missing pool or owner query parameter' });
+      return;
+    }
+
+    try {
+      const ownerPk = new PublicKey(ownerParam);
+      const poolPositions = this.subscriber.getPositionsForPool(poolParam);
+      const userPositions = poolPositions.filter(p => p.owner.equals(ownerPk));
+
+      if (userPositions.length === 0) {
+        this.json(res, 200, { bins: [], activeBin: null });
+        return;
+      }
+
+      const lbPairPk = new PublicKey(poolParam);
+      const dlmm = await getDLMM(this.connection, lbPairPk);
+      await dlmm.refetchStates();
+      const activeBin = dlmm.lbPair.activeId;
+
+      const bins: Map<number, { buy: number; sell: number }> = new Map();
+
+      for (const pos of userPositions) {
+        const [vaultPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('vault'), pos.meteoraPosition.toBuffer()],
+          this.coreProgramId,
+        );
+
+        const { userPositions: meteoraPositions } =
+          await dlmm.getPositionsByUserAndLbPair(vaultPda);
+
+        const meteoraPos = meteoraPositions.find(
+          (p: any) => p.publicKey.equals(pos.meteoraPosition),
+        );
+        if (!meteoraPos) continue;
+
+        const binData = meteoraPos.positionData.positionBinData;
+        if (!binData || binData.length === 0) continue;
+
+        const side = pos.side.toLowerCase() as 'buy' | 'sell';
+        for (const bin of binData) {
+          const xAmount = Number(bin.positionXAmount) / 1e9;
+          const yAmount = Number(bin.positionYAmount) / 1e9;
+          const amount = side === 'sell' ? xAmount : yAmount;
+          if (amount <= 0) continue;
+
+          const entry = bins.get(bin.binId) || { buy: 0, sell: 0 };
+          entry[side] += amount;
+          bins.set(bin.binId, entry);
+        }
+      }
+
+      const binsArray = [...bins.entries()]
+        .map(([binId, amounts]) => ({ binId, ...amounts }))
+        .sort((a, b) => a.binId - b.binId);
+
+      this.json(res, 200, { bins: binsArray, activeBin });
+    } catch (e: any) {
+      logger.error(`[relay] /api/user-bins error: ${e.message}`);
+      this.json(res, 500, { error: 'Failed to fetch user bins' });
     }
   }
 

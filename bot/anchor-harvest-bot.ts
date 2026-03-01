@@ -488,6 +488,7 @@ class HarvestBot {
     // Initialize relay server (WebSocket + REST) on the same HTTP server
     this.relay = new RelayServer(
       this.subscriber, this.executor, this.keeper,
+      this.connection, CORE_PROGRAM_ID,
       () => this.getBotWalletInfo(),
       () => this.getFeePipelineState(),
     );

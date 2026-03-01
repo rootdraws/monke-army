@@ -87,6 +87,12 @@ function asSigner(pubkeyOrAddress) {
   };
 }
 
+/** Sign + send: tx goes to Phantom clean (no pre-compilation, no mutation). */
+async function walletSendTransaction(tx, options = {}) {
+  const signed = await state.wallet.signTransaction(tx);
+  return await state.connection.sendRawTransaction(signed.serialize(), options);
+}
+
 /** Wrap RPC account data as an EncodedAccount for Codama decoders */
 function toEncodedAccount(pubkeyOrStr, data, programAddr) {
   return {
@@ -192,15 +198,22 @@ function handleRelayEvent(msg) {
         if (priceEl) priceEl.textContent = '$' + formatPrice(newPrice);
         vizState.activeBin = msg.data.newActiveId;
         renderBinViz();
+        // Re-fetch user bins since price moved (bins may have filled)
+        loadUserBins().then(() => renderBinViz());
       }
       break;
 
     case 'harvestExecuted':
     case 'positionClosed':
-    case 'harvestNeeded':
     case 'positionChanged':
+      addFeedEvent(formatRelayEvent(msg));
+      refreshPositionsList();
+      if (state.currentPage === 2) renderPositionsPage();
+      loadUserBins().then(() => renderBinViz());
+      break;
+
+    case 'harvestNeeded':
     case 'roverTvlUpdated':
-      // Feed to Ops activity log
       addFeedEvent(formatRelayEvent(msg));
       break;
 
@@ -852,6 +865,7 @@ async function connectWallet(walletId) {
 
     showToast(`Connected via ${w.name}`, 'success');
     refreshPositionsList();
+    loadBinVizData();
     renderMonkeList();
     updateEnlistBalance();
     updateFee();
@@ -1377,11 +1391,20 @@ async function renderPositionsPage() {
 function aggregateUserBins(positions, activeBin) {
   const bins = new Map();
   for (const pos of positions) {
-    const preview = computeBidAskPreview(
-      pos.initialAmount, pos.minBinId, pos.maxBinId, activeBin
-    );
+    const side = pos.side || 'buy';
+    const remaining = Math.max(0, pos.initialAmount - (pos.harvestedAmount || 0));
+    if (remaining <= 0) continue;
+
+    // Only show unfilled bins: buy = at/below active, sell = at/above active
+    const effectiveMin = side === 'sell' ? Math.max(pos.minBinId, activeBin) : pos.minBinId;
+    const effectiveMax = side === 'buy' ? Math.min(pos.maxBinId, activeBin) : pos.maxBinId;
+    if (effectiveMin > effectiveMax) continue;
+
+    const preview = computeBidAskPreview(remaining, effectiveMin, effectiveMax, activeBin);
     for (const [binId, amount] of preview) {
-      bins.set(binId, (bins.get(binId) || 0) + amount);
+      const entry = bins.get(binId) || { buy: 0, sell: 0 };
+      entry[side] += amount;
+      bins.set(binId, entry);
     }
   }
   return bins;
@@ -1433,7 +1456,8 @@ function renderBinViz() {
   for (let bin = lowBin; bin <= highBin; bin++) {
     const pool = poolBins.get(bin);
     const poolTotal = pool ? pool.amountX + pool.amountY : 0;
-    const user = userBins.get(bin) || 0;
+    const ub = userBins.get(bin);
+    const user = ub ? ub.buy + ub.sell : 0;
     const preview = previewBins.get(bin) || 0;
     maxPoolLiq = Math.max(maxPoolLiq, poolTotal);
     maxUserLiq = Math.max(maxUserLiq, user + preview);
@@ -1463,7 +1487,10 @@ function renderBinViz() {
 
     const pool = poolBins.get(bin);
     const poolTotal = pool ? pool.amountX + pool.amountY : 0;
-    const user = userBins.get(bin) || 0;
+    const ub = userBins.get(bin);
+    const userBuy = ub ? ub.buy : 0;
+    const userSell = ub ? ub.sell : 0;
+    const userTotal = userBuy + userSell;
     const preview = previewBins.get(bin) || 0;
 
     const colW = barAreaW * 0.46;
@@ -1481,21 +1508,28 @@ function renderBinViz() {
       ctx.fillRect(xLabelWidth, yCenter - halfBar, barW, barH);
     }
 
-    // User + preview bars (right column)
+    // User + preview bars (right column) — colored by position side, not bin position
     const userX = xLabelWidth + barAreaW * 0.54;
-    const isSell = bin > activeBin;
+    let userDrawn = 0;
 
-    if (user > 0) {
-      const barW = (user / maxUserLiq) * colW;
-      ctx.fillStyle = isSell ? userSellColor : userBuyColor;
+    if (userBuy > 0) {
+      const barW = (userBuy / maxUserLiq) * colW;
+      ctx.fillStyle = userBuyColor;
       ctx.fillRect(userX, yCenter - halfBar, barW, barH);
+      userDrawn += barW;
+    }
+    if (userSell > 0) {
+      const barW = (userSell / maxUserLiq) * colW;
+      ctx.fillStyle = userSellColor;
+      ctx.fillRect(userX + userDrawn, yCenter - halfBar, barW, barH);
+      userDrawn += barW;
     }
 
     if (preview > 0) {
-      const existingW = user > 0 ? (user / maxUserLiq) * colW : 0;
       const previewW = (preview / maxUserLiq) * colW;
-      ctx.fillStyle = isSell ? previewSellColor : previewBuyColor;
-      ctx.fillRect(userX + existingW, yCenter - halfBar, previewW, barH);
+      const isSellPreview = bin > activeBin;
+      ctx.fillStyle = isSellPreview ? previewSellColor : previewBuyColor;
+      ctx.fillRect(userX + userDrawn, yCenter - halfBar, previewW, barH);
     }
   }
 
@@ -1583,14 +1617,40 @@ async function loadBinVizData() {
     vizState.poolBins = new Map();
   }
 
+  await loadUserBins();
+  updateBinVizPreview();
+}
+
+async function loadUserBins() {
+  if (!state.poolAddress) return;
+
+  // Try real on-chain bin data from bot relay first
+  if (state.publicKey) {
+    try {
+      const data = await relayFetch(
+        `/api/user-bins?pool=${state.poolAddress}&owner=${state.publicKey.toBase58()}`
+      );
+      if (data && data.bins && data.bins.length > 0) {
+        const map = new Map();
+        for (const b of data.bins) {
+          map.set(b.binId, { buy: b.buy || 0, sell: b.sell || 0 });
+        }
+        vizState.userBins = map;
+        if (CONFIG.DEBUG) console.log('[monke] User bins from relay:', map.size);
+        return;
+      }
+    } catch (e) {
+      if (CONFIG.DEBUG) console.warn('[monke] Relay user-bins failed, falling back to synthetic:', e);
+    }
+  }
+
+  // Fallback: synthetic approximation from on-chain position accounts
   try {
     const positions = await fetchUserPositions(state.poolAddress);
     vizState.userBins = aggregateUserBins(positions, state.activeBin);
   } catch {
     vizState.userBins = new Map();
   }
-
-  updateBinVizPreview();
 }
 
 // ============================================================
@@ -1717,19 +1777,6 @@ async function createPosition() {
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
-    // Simulate first to get detailed error logs before wallet popup
-    const simResult = await conn.simulateTransaction(tx);
-    if (simResult.value.err) {
-      console.error('[monke] Simulation failed:', simResult.value.err);
-      console.error('[monke] Logs:', simResult.value.logs);
-      const lastLog = simResult.value.logs?.filter(l => l.includes('Error') || l.includes('failed') || l.includes('error')).pop()
-        || simResult.value.logs?.pop() || JSON.stringify(simResult.value.err);
-      throw new Error('Simulation: ' + lastLog);
-    }
-    if (CONFIG.DEBUG) console.log('[monke] Simulation OK:', simResult.value.logs);
-
-    // Phantom must sign first so it can simulate the tx cleanly (single-signer from its POV).
-    // Position keypair signs after to satisfy Meteora's initialize_position requirement.
     showToast('Approve in wallet...', 'info');
     const signed = await state.wallet.signTransaction(tx);
     signed.partialSign(meteoraPositionKeypair);
@@ -1740,9 +1787,9 @@ async function createPosition() {
     showToast('Position created!', 'success');
     if (CONFIG.DEBUG) console.log(`[monke] Position tx: ${sig}`);
 
-    // Refresh positions list + chart from on-chain
     await refreshPositionsList();
     loadBinVizData();
+    if (state.currentPage === 2) renderPositionsPage();
   } catch (err) {
     console.error('Position creation failed:', err);
     showToast('Failed: ' + (err?.message || err), 'error');
@@ -1901,15 +1948,8 @@ async function closePosition(index) {
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
-    const simResult = await conn.simulateTransaction(tx);
-    if (simResult.value.err) {
-      console.error('[monke] Close simulation failed:', simResult.value.err, simResult.value.logs);
-      throw new Error('Close simulation failed: ' + JSON.stringify(simResult.value.err));
-    }
-
     showToast('Approve in wallet...', 'info');
-    const signed = await state.wallet.signTransaction(tx);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+    const sig = await walletSendTransaction(tx, { skipPreflight: true });
     showToast('Confirming...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 
@@ -1996,15 +2036,8 @@ async function closePositionDirect(pos) {
   tx.lastValidBlockHeight = lastValidBlockHeight;
   tx.feePayer = user;
 
-  const simResult = await conn.simulateTransaction(tx);
-  if (simResult.value.err) {
-    console.error('[monke] Close simulation failed:', simResult.value.err, simResult.value.logs);
-    throw new Error('Close simulation failed: ' + JSON.stringify(simResult.value.err));
-  }
-
   showToast('Approve in wallet...', 'info');
-  const signed = await state.wallet.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+  const sig = await walletSendTransaction(tx, { skipPreflight: true });
   showToast('Confirming...', 'info');
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
   if (CONFIG.DEBUG) console.log(`[monke] Close tx: ${sig}`);
@@ -2061,8 +2094,7 @@ async function claimFeesDirect(pos) {
   tx.feePayer = user;
 
   showToast('Approve in wallet...', 'info');
-  const signed = await state.wallet.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+  const sig = await walletSendTransaction(tx);
   showToast('Confirming fee claim...', 'info');
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
   if (CONFIG.DEBUG) console.log(`[monke] Claim fees tx: ${sig}`);
@@ -2553,8 +2585,7 @@ async function handleFeedMonke(nftMintStr) {
     tx.feePayer = user;
 
     showToast('Approve in wallet...', 'info');
-    const signed = await state.wallet.signTransaction(tx);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    const sig = await walletSendTransaction(tx);
     showToast('Confirming burn...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
     showToast('1M $BANANAS burned to your Monke!', 'success');
@@ -2594,8 +2625,7 @@ async function handleClaimMonke(nftMintStr) {
     tx.feePayer = user;
 
     showToast('Approve in wallet...', 'info');
-    const signed = await state.wallet.signTransaction(tx);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    const sig = await walletSendTransaction(tx);
     showToast('Confirming claim...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
     showToast('SOL claimed!', 'success');
@@ -2634,8 +2664,7 @@ async function handleClaimAll() {
     tx.feePayer = user;
 
     showToast('Approve in wallet...', 'info');
-    const signed = await state.wallet.signTransaction(tx);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    const sig = await walletSendTransaction(tx);
     showToast('Confirming claims...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
     showToast(`Claimed from ${claimable.length} monke${claimable.length > 1 ? 's' : ''}!`, 'success');
@@ -2791,8 +2820,7 @@ async function handleCrankSweep() {
     tx.recentBlockhash = blockhash; tx.lastValidBlockHeight = lastValidBlockHeight; tx.feePayer = user;
 
     showToast('Approve sweep...', 'info');
-    const signed = await state.wallet.signTransaction(tx);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    const sig = await walletSendTransaction(tx);
     showToast('Confirming sweep...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
     showToast('Swept SOL — 50% to dist pool, 50% to bot!', 'success');
@@ -2823,8 +2851,7 @@ async function handleCrankDeposit() {
     tx.recentBlockhash = blockhash; tx.lastValidBlockHeight = lastValidBlockHeight; tx.feePayer = user;
 
     showToast('Approve deposit...', 'info');
-    const signed = await state.wallet.signTransaction(tx);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    const sig = await walletSendTransaction(tx);
     showToast('Confirming deposit...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
     showToast('SOL deposited to program vault!', 'success');
@@ -2929,15 +2956,8 @@ async function handleHarvestPosition(positionPDAStr, lbPairStr, ownerStr, side) 
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
   tx.recentBlockhash = blockhash; tx.lastValidBlockHeight = lastValidBlockHeight; tx.feePayer = user;
 
-  const simResult = await conn.simulateTransaction(tx);
-  if (simResult.value.err) {
-    console.error('[monke] Harvest simulation failed:', simResult.value.err, simResult.value.logs);
-    throw new Error('Harvest simulation failed: ' + JSON.stringify(simResult.value.err));
-  }
-
   showToast('Approve harvest...', 'info');
-  const signed = await state.wallet.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+  const sig = await walletSendTransaction(tx, { skipPreflight: true });
   showToast('Confirming harvest...', 'info');
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 }

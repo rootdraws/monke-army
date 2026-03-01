@@ -43,7 +43,7 @@ Flash loans unwind within the same slot. The Harvester always submits to a futur
 
 ### Permissionless Harvesting - Decentralized Backup
 
-If the Monke Harvester is down for longer than 40 seconds, anybody can call harvest, close, or sweep — and earn 10% of the fees for the work they do.
+If the Monke Harvester is stale, anybody can call harvest, close, or sweep — and earn a keeper tip from the fees for the work they do.
 
 Every step in the revenue pipeline is permissionless. Harvest, close, sweep, distribute, deposit — all crankable by anyone. The bot is just faster. monke.army is built to be fast and convenient through running our own infrastructure, but the system is resilient without it. 
 
@@ -89,7 +89,7 @@ The result is structural predation against existing passive LPs. Your users are 
 
 ## Fee Flow
 
-50% of fees to monke holders. 50% to operations (bot self-funding). Zero team token allocation.
+50% of protocol fees to monke holders. 50% to operations (bot self-funding). Zero team token allocation.
 
 ```
 Two revenue streams → sweep_rover splits 50/50:
@@ -129,10 +129,10 @@ Prefer Aesthetic.
 Yes. Runtime detection, V1/V2 CPI branching. Zero additional configuration. Exception: Token-2022 mints with active transfer hooks are not yet supported.
 
 **What about the dev fee?**
-50% of protocol fees go to monke holders who burned $BANANAS. 50% goes to the bot keypair to fund operations (harvest transactions, keeper cranks, rover rent). DAMM v2 pool trading fees are retained by the operator. Zero team token allocation — the dev participates in the Alpha Vault fair launch like everyone else, same price, same terms. The 50/50 split on protocol fees is hardcoded on-chain.
+50% of protocol fees go to monke holders who burned $BANANAS. 50% goes to the bot keypair to fund operations (harvest transactions, keeper cranks, rover rent). Zero team token allocation — the dev participates in the Alpha Vault fair launch like everyone else, same price, same terms. The 50/50 split is hardcoded on-chain.
 
 **How was $BANANAS launched?**
-100% of supply (1B tokens, 6 decimals) into a Meteora DAMM v2 pool. Alpha Vault pro-rata fair launch — everyone deposits SOL during a 2-week window, everyone gets the same price. 420 SOL vault capacity. initPrice: 0.000001 SOL/token (1 SOL = 1 monke feed). Liquidity permanently locked. 69% sniper tax decaying to 1% over 3 hours. Zero dev allocation. No pre-mine. No team tokens.
+100% of supply (1B tokens, 6 decimals) into a Meteora DAMM v2 pool. Alpha Vault pro-rata fair launch — everyone deposits SOL during a 2-week window, everyone gets the same price. 420 SOL vault capacity. initPrice: 0.000001 SOL/token (1 SOL = 1 monke feed). Liquidity permanently locked — trading fees from the locked position are retained by the operator (not part of the 50/50 protocol split). 69% sniper tax decaying to 1% over 3 hours. Zero dev allocation. No pre-mine. No team tokens.
 
 ---
 

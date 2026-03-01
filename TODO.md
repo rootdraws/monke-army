@@ -2,55 +2,7 @@
 
 ---
 
-## RESOLVED — Token-2022 transfer CPI fix (Feb 23, session 3)
-
-- [x] **Fix transfer CPI for Token-2022** — Replaced `anchor_spl::token::{Transfer, transfer}` with `anchor_spl::token_interface::{TransferChecked, transfer_checked}` at all **14** call sites (6 in `harvest_bins`, 2 in `claim_fees`, 2 in `apply_emergency_close`, 4 in `execute_close_transfers`). Added `read_mint_decimals()` helper. Added `token_x_mint`/`token_y_mint` to `ApplyEmergencyClose` context. Deployed to mainnet (`xvvSGjb...`). Verified: stuck Token-2022 position `3qQGCmDY` closed successfully (`4bn2uPU...`). First fee revenue (85.8M raw Token X) routed to rover_authority and recycled into BidAskImBalanced DLMM via `open_fee_rover` (`yUWvbdi...`).
-- [x] **Fee rover CU fix** — Keeper's `openFeeRover` CU budget bumped from 400K to 1M in `bot/keeper.ts`. `AddLiquidityByStrategy2` with 69 bins exceeded 400K.
-- [x] **Bot wallet monitoring** — Added `/api/bot-wallet` endpoint to relay (`bot/relay-server.ts`). Returns: balance, spend rate/hour, estimated hours remaining, net spent since startup, status (healthy/warning/critical). Balance history tracked in orchestrator (288-sample rolling window).
-- [x] **Recycle script** — `scripts/recycle-fee-rover.ts`: standalone script to open fee rover positions from accumulated token fees. Takes optional pool address argument.
-
----
-
-## RESOLVED — 50/50 fee split (Feb 23, session 4)
-
-- [x] **Hardcoded 50/50 sweep split** — `sweep_rover` in `lib.rs` now splits all swept SOL: 50% to `revenue_dest` (dist_pool → monke holders), 50% to `Config.bot` (operations). `SweepRover` context gained `bot_dest` account (validated against `Config.bot`). `RoverSweptEvent` emits `monke_share`, `operator_share`, `bot`. `InvalidBot` error added. Bot keeper (`keeper.ts`) and frontend (`app.js`) updated to pass `botDest`. IDL regenerated. All docs, comments, and HTML updated. Effective user cost: 0.15% (half of 0.3% fee).
-- [x] **Anchor.toml solana_version sync** — Updated from `2.1.0` to `3.0.15` to match installed Solana CLI. Required for `anchor idl build`.
-
----
-
-## Tier 1 — Security
-
-- [ ] **Rotate Helius API key** — Go to Helius dashboard, generate new key. Free-tier key for `public/config.json`, Pro key in `bot/.env` only. Do before repo goes public.
-
----
-
-## Tier 2 — Deploy + E2E testing
-
-### Deploy bot to server
-
-PM2 config ready at `bot/ecosystem.config.cjs`. Steps:
-
-1. Create DigitalOcean droplet (Ubuntu 22.04, 2GB RAM, $12/mo)
-2. `ssh root@<ip>`, install Node 20, clone repo, `npm install`
-3. `cp bot/anchor-harvest-bot.env.example bot/.env` — fill RPC_URL, GRPC_ENDPOINT, BOT_KEYPAIR_PATH
-4. Copy bot keypair JSON to server
-5. `npm install -g pm2`
-6. `pm2 start bot/ecosystem.config.cjs`
-7. `pm2 save && pm2 startup`
-8. Verify: `curl http://localhost:8080/api/stats`
-9. Set up nginx reverse proxy with SSL for `wss://bot.monke.army` (or open port 8080)
-
-### Deploy frontend
-
-Vercel config ready at `vercel.json`. Steps:
-
-1. `npm i -g vercel`
-2. `vercel` — link project, confirm build command (`npm run build:frontend`), output dir (`dist`)
-3. DNS: point `monke.army` to Vercel
-4. Update `dist/config.json` with production `BOT_RELAY_URL` (`wss://bot.monke.army` or droplet IP)
-5. Verify all 6 pages load
-
-### E2E test runbook
+## E2E test runbook
 
 Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
@@ -67,21 +19,19 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
 ---
 
-## Tier 4 — Independent feature work (no program changes)
+## Feature work
 
 - [ ] **Recon page** — Rover TVL leaderboard, top-5 analytics, bribe deposit, click-to-trade. Pure frontend, depends on relay data.
 - [ ] **Rover TVL computation** — Bot-side dollar-value computation for rover positions. Wire callback to relay.
-- [ ] **Load $BANANAS DLMM** — Create a BANANAS/SOL DLMM pool on Meteora, list as default pair option on Trade page. Operational task.
-- [ ] **compost_monke crank** — Requires an observation indexer to scan for burned NFTs (supply == 0) with active MonkeBurn PDAs. New infrastructure.
-- [ ] **Transfer hook support** — Resolve transfer hook extra accounts from mint extension data via DLMM SDK. Unlocks pools with transfer hook mints. Add when demand exists.
-- [ ] **Program split** — Move rover system to separate program. Constrained by rover_authority LP NFT ownership (CPI gateway required). Add if stack pressure or code separation justifies it.
+- [ ] **Add BANANAS/SOL to Trade page** — DAMM v2 pool is live. Add as selectable pair on Trade page (needs DLMM pool or adapter).
+- [ ] **compost_monke crank** — Requires an observation indexer to scan for burned NFTs (supply == 0) with active MonkeBurn PDAs.
+- [ ] **Transfer hook support** — Resolve transfer hook extra accounts from mint extension data via DLMM SDK. Add when demand exists.
+- [ ] **Program split** — Move rover system to separate program. Add if stack pressure or code separation justifies it.
 
 ---
 
 ## BD
 
-- [ ] **Submit Graveyard Hackathon** — Deadline Feb 28.
-- [ ] **Attend Monke Weekly Townhall** — Feb 27, 17:00 UTC.
 - [ ] **Apply MonkeFoundry Cohort 2**
 - [ ] **Apply Meteora Rising**
 - [ ] **Pitch Helius for LaserStream sponsorship**
@@ -98,4 +48,4 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
 ---
 
-*Last updated: Feb 23, 2026 (session 4).*
+*Last updated: Mar 1, 2026.*

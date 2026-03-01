@@ -8,9 +8,10 @@
  */
 
 import AlphaVault, { deriveEscrow, getOrCreateATAInstruction, unwrapSOLInstruction } from '@meteora-ag/alpha-vault';
-import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
-import { NATIVE_MINT } from '@solana/spl-token';
+import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram } from '@solana/web3.js';
+import { NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import { BN } from '@coral-xyz/anchor';
+import { CpAmm, CP_AMM_PROGRAM_ID } from '@meteora-ag/cp-amm-sdk';
 
 // Read config from the global CONFIG object set by app.js,
 // or fall back to fetching config.json directly
@@ -418,6 +419,85 @@ async function handleWithdraw() {
   }
 }
 
+async function fillVaultDammV2(wallet) {
+  const av = enlistState.vault;
+  const vault = av.vault;
+
+  const inAmountCap = vault.vaultMode === 0
+    ? BN.min(vault.totalDeposit, vault.maxBuyingCap)
+    : vault.totalDeposit;
+
+  if (vault.swappedAmount.gte(inAmountCap)) return; // already filled
+
+  const cpAmm = new CpAmm(enlistState.connection);
+  const poolState = await cpAmm.fetchPoolState(vault.pool);
+  const { tokenAVault, tokenBVault, tokenAMint, tokenBMint, tokenAFlag, tokenBFlag } = poolState;
+
+  const tokenAProgram = tokenAFlag === 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
+  const tokenBProgram = tokenBFlag === 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
+
+  const poolAuthority = PublicKey.findProgramAddressSync(
+    [Buffer.from('pool_authority')], CP_AMM_PROGRAM_ID
+  )[0];
+
+  const dammEventAuthority = PublicKey.findProgramAddressSync(
+    [Buffer.from('__event_authority')], CP_AMM_PROGRAM_ID
+  )[0];
+
+  const alphaVaultProgramId = av.program.programId;
+  const eventAuthority = PublicKey.findProgramAddressSync(
+    [Buffer.from('__event_authority')], alphaVaultProgramId
+  )[0];
+
+  const preInstructions = [];
+  const { ataPubKey: tokenOutVault, ix: createTokenOutVaultIx } =
+    await getOrCreateATAInstruction(
+      enlistState.connection,
+      vault.baseMint,
+      av.pubkey,
+      wallet.publicKey,
+      av.baseMintInfo.tokenProgram,
+    );
+  if (createTokenOutVaultIx) preInstructions.push(createTokenOutVaultIx);
+
+  const fillTx = await av.program.methods
+    .fillDammV2(inAmountCap)
+    .accountsPartial({
+      vault: av.pubkey,
+      tokenVault: vault.tokenVault,
+      tokenOutVault,
+      ammProgram: CP_AMM_PROGRAM_ID,
+      poolAuthority,
+      pool: vault.pool,
+      tokenAVault,
+      tokenBVault,
+      tokenAMint,
+      tokenBMint,
+      tokenAProgram,
+      tokenBProgram,
+      dammEventAuthority,
+      cranker: wallet.publicKey,
+      systemProgram: SystemProgram.programId,
+      eventAuthority,
+      program: alphaVaultProgramId,
+    })
+    .preInstructions(preInstructions)
+    .transaction();
+
+  const { blockhash, lastValidBlockHeight } =
+    await enlistState.connection.getLatestBlockhash('confirmed');
+  const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: wallet.publicKey })
+    .add(fillTx);
+
+  const signed = await wallet.signTransaction(tx);
+  const sig = await enlistState.connection.sendRawTransaction(signed.serialize());
+  await enlistState.connection.confirmTransaction(sig, 'confirmed');
+  console.log('[enlist] Vault filled:', sig);
+  showToast('vault filled — now claiming tokens...', 'success');
+
+  await av.refreshState();
+}
+
 async function handleClaim() {
   const wallet = getWalletAdapter();
   if (!wallet || !enlistState.vault) return;
@@ -427,6 +507,19 @@ async function handleClaim() {
   if (btn) { btn.textContent = 'claiming...'; btn.disabled = true; }
 
   try {
+    // DAMM v2 vaults: SDK fillVault is unimplemented — fill manually first
+    if (enlistState.vault.vault.poolType === 2) {
+      const inAmountCap = enlistState.vault.vault.vaultMode === 0
+        ? BN.min(enlistState.vault.vault.totalDeposit, enlistState.vault.vault.maxBuyingCap)
+        : enlistState.vault.vault.totalDeposit;
+
+      if (enlistState.vault.vault.swappedAmount.lt(inAmountCap)) {
+        if (btn) btn.textContent = 'filling vault...';
+        await fillVaultDammV2(wallet);
+      }
+    }
+
+    if (btn) btn.textContent = 'claiming...';
     const claimTx = await enlistState.vault.claimToken(wallet.publicKey);
     const signed = await wallet.signTransaction(claimTx);
     const sig = await enlistState.connection.sendRawTransaction(signed.serialize());

@@ -28,8 +28,8 @@ open_position_v2(pool, amount, min_bin, max_bin, side, max_active_bin_slippage)
 harvest_bins(bin_ids: Vec<i32>)
   → SOL fees → rover_authority → sweep_rover → 50% dist_pool (monke holders) + 50% bot. TOKEN fees → rover_authority (DLMM recycling)
   → Remainder → owner. Position stays open.
-  → Permissionless fallback: anyone can call when bot is stale (~40s),
-    earns keeper_tip_bps (10%) of the fee.
+  → Permissionless fallback: anyone can call when bot is stale,
+    earns a keeper tip from the fee.
 
 close_position()
   → Same fee mechanic + permissionless fallback.
@@ -47,7 +47,7 @@ compost_monke()
   → Subtracts dead weight. Rent refund to caller.
 
 open_rover_position(amount, bin_step)
-  → Anyone deposits bribe tokens into sell-side BidAskImBalanced DLMM position.
+  → Deposit tokens into sell-side BidAskImBalanced DLMM position.
   → active_id read from on-chain lb_pair (never trust caller).
   → Position owned by rover_authority PDA. One-way. No refunds.
 
@@ -79,22 +79,15 @@ BUY THE DIPS (SOL deposited below price → token output):
 ## Project Structure
 
 ```
-bin-farm/
+monke-army/
 ├── programs/                      # Anchor workspace (build targets)
 │   ├── bin-farm/src/
 │   │   ├── lib.rs                 # Core program (positions, harvest, close, fees, rovers)
 │   │   └── meteora_dlmm_cpi.rs   # Meteora DLMM CPI wrappers (V2 only)
 │   └── monke-bananas/src/lib.rs   # Burn $BANANAS, stack weight, claim SOL, compost dead monkes
 ├── src/
-│   ├── contracts/                 # Reference copies (keep in sync with programs/)
 │   ├── enlist.js                  # Alpha Vault SDK integration (bundled → dist/enlist.bundle.js)
-│   ├── sdk/
-│   │   └── meteora.js             # DLMM wrapper (read-only queries + fill%)
-│   ├── utils/
-│   │   ├── transaction.js         # TX builders (Anchor discriminator + borsh)
-│   │   └── bins.js                # Bin/price math utilities
-│   └── hooks/
-│       └── useWallet.js           # Multi-wallet connection (wallet-adapter)
+│   └── generated/                 # Codama-generated TypeScript clients (bin-farm + monke-bananas)
 ├── bot/                           # Monke's Harvester (off-chain infrastructure)
 │   ├── anchor-harvest-bot.ts      # Orchestrator + health endpoint + relay wiring
 │   ├── geyser-subscriber.ts       # Helius LaserStream gRPC — sub-second bin detection
@@ -104,25 +97,24 @@ bin-farm/
 │   ├── keeper.ts                  # MonkeKeeper: Saturday sequencer + rover TVL computation
 │   ├── retry.ts                   # Shared withRetry (exponential backoff, 3 retries)
 │   └── logger.ts                  # Pino structured logging
-├── public/                        # Frontend: Enlist / Trade / Positions / Rank / Ops / Recon
-│   ├── index.html                 # 6 pages (Enlist/Trade/Positions/Rank/Ops/Recon) + sigil astrolabe
+├── public/                        # Frontend: Trade / Positions / Rank / Ops / Recon
+│   ├── index.html                 # Navigation sigil astrolabe + all page layouts
 │   ├── styles.css                 # Military monke color palette + all page styles
 │   ├── app.js                     # Page logic, relay WebSocket client, Codama instruction builders
-│   └── config.json                # Program IDs, RPC, BOT_RELAY_URL, ALPHA_VAULT_ADDRESS
+│   └── config.json                # Program IDs, RPC, BOT_RELAY_URL
 ├── scripts/
-│   ├── deploy-and-init.mjs        # Deploy + init atomically (anti-front-run)
+│   ├── deploy-and-init.mjs        # Deploy + init programs atomically (anti-front-run)
 │   ├── build-frontend.mjs         # Frontend build: bundle app.js (Codama + @solana/kit) + enlist.js
 │   ├── generate-clients.mjs       # Codama client generation from IDL → src/generated/
-│   ├── test-close-position.ts     # E2E test: close a stuck position (mainnet)
-│   └── recycle-fee-rover.ts       # Open fee rover from accumulated token fees in rover_authority
+│   ├── test-close-position.ts     # Close a stuck position (mainnet)
+│   └── recycle-fee-rover.ts       # Open fee rover from accumulated token fees
 ├── meteora-invent/                # Meteora DAMM v2 launch toolkit (cloned)
-│   └── studio/config/damm_v2_config.jsonc  # $BANANAS pool + Alpha Vault config (locked params)
+│   └── studio/config/damm_v2_config.jsonc  # $BANANAS pool + Alpha Vault config
 ├── Anchor.toml                    # Workspace config (2 programs, devnet + mainnet)
 ├── Cargo.toml                     # Workspace root
 ├── whitepaper.md                  # Product overview + mechanics
 ├── TODO.md                        # Task list
-├── ref/dlmm-sdk/                  # Cloned Meteora DLMM SDK (source of truth for CPI layouts)
-└── src/generated/                 # Codama-generated TypeScript clients
+└── ref/dlmm-sdk/                  # Cloned Meteora DLMM SDK (source of truth for CPI layouts)
 ```
 
 ## Build & Deploy
@@ -170,29 +162,20 @@ Regenerate after any on-chain struct change. IDL files at `bot/idl/` are used by
 
 ```bash
 cp bot/anchor-harvest-bot.env.example bot/.env
-# Edit bot/.env — set RPC_URL, GRPC_ENDPOINT, BOT_KEYPAIR_PATH, etc.
+# Edit bot/.env — set RPC_URL, GRPC_ENDPOINT, etc.
 npm run bot
 ```
 
-Required env vars: `RPC_URL`, `GRPC_ENDPOINT`, `BOT_KEYPAIR_PATH`, `CORE_PROGRAM_ID`, `MONKE_BANANAS_PROGRAM_ID`, `BANANAS_MINT`.
-
-Saturday sequence:
-1. Close WSOL ATAs on rover_authority (unwrap to native SOL)
-2. Sweep SOL from rover_authority → 50% dist_pool + 50% Config.bot
-4. Open fee rover positions from accumulated token fees (BidAskImBalanced DLMM)
-5. Deposit SOL from dist_pool → monke program vault → accumulator
-6. Close exhausted rover positions (reclaim rent)
-
-Plus: sub-second harvest via LaserStream, permissionless fallback on all operations (harvest, close, sweep, deposit — anyone can crank when bot is stale and earn a tip), 5-minute safety poll, adaptive intervals, health endpoint.
+Sub-second harvest via LaserStream, permissionless fallback on all operations (harvest, close, sweep, deposit — anyone can crank when bot is stale and earn a tip), periodic fee sweeps, adaptive intervals, health endpoint.
 
 ## Run Frontend
 
 ```bash
 node scripts/build-frontend.mjs && npx serve dist   # local dev
-npm run build:frontend && npx serve dist             # production
+node scripts/build-frontend.mjs                      # production (Vercel runs this)
 ```
 
-Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page), **Trade** (DLMM harvester, default SOL/USDC pool), **Positions** (all wallet positions with inline close + claim fees), **Rank** (monke feed/claim + leaderboard, sub-pages: Monke + Roster), **Ops** (bounty board + permissionless crank + live stats from relay), **Recon** (rover TVL — deferred). 6-page navigation with sigil astrolabe. Bot relay provides live data via WebSocket (`/ws`) and REST (`/api/*`) on the same health server port.
+Frontend pages: **Trade** (DLMM harvester, default SOL/USDC pool), **Positions** (all wallet positions with inline close + claim fees), **Rank** (monke feed/claim + leaderboard, sub-pages: Monke + Roster), **Ops** (bounty board + permissionless crank + live stats from relay), **Recon** (rover TVL — deferred). Sigil astrolabe navigation. Bot relay provides live data via WebSocket (`/ws`) and REST (`/api/*`) at `wss://bot.monke.army`.
 
 ## Mainnet Addresses
 
@@ -222,12 +205,11 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page),
 ### Launch Parameters
 
 - **Init Price:** 0.000001 SOL/token (1 SOL = 1M BANANAS = 1 monke feed)
-- **Alpha Vault:** Pro-rata, 420 SOL max buying cap, permissionless
-- **Deposit Window:** Feb 16, 2026 → March 1, 2026
-- **Activation:** March 1, 2026 00:00 UTC (trading begins)
+- **Alpha Vault:** Pro-rata, 420 SOL max buying cap, permissionless (closed)
+- **Activation:** March 1, 2026 00:00 UTC (trading live)
 - **Vesting:** Instant (1s after activation)
 - **Fee Decay:** 69% → 1% over 3 hours (sniper tax)
-- **Liquidity:** 100% permanently locked. No dev allocation.
+- **Liquidity:** 100% permanently locked (DAMM v2 position NFT held by operator). Trading fees from the locked liquidity position are private to the operator — not part of the 50/50 protocol split.
 - **Supply:** 1,000,000,000 BANANAS (6 decimals). Mint/freeze/update authorities revoked.
 
 ## SMB Integration — Feed Your Monke
@@ -239,6 +221,20 @@ Frontend pages: **Enlist** (Alpha Vault fair launch — temporary landing page),
 - **Revenue:** 50% of protocol fees flow to fed monke holders. 50% funds bot operations.
 - **Claiming:** Weight and unclaimed SOL travel with the NFT on secondary sales.
 - **Cleanup:** `compost_monke` — permissionless removal of dead weight when NFT is burned (supply == 0)
+
+## Deployment
+
+| Component | URL |
+|-----------|-----|
+| Frontend | [monke.army](https://www.monke.army/) |
+| Bot Relay | `wss://bot.monke.army` |
+
+## Security
+
+- **Upgrade authority:** Retained by operator. Program can be upgraded.
+- **Audit status:** Unaudited. Use at your own risk.
+- **Fee split:** 50/50 hardcoded on-chain (dist_pool / Config.bot). Not governable by operator.
+- **Permissionless fallback:** All harvests and sweeps can be cranked by anyone when the bot is stale, preventing fund lock-up.
 
 ## Known Limitations
 
