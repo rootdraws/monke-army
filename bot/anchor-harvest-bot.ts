@@ -27,7 +27,7 @@ import dotenv from 'dotenv';
 import * as http from 'http';
 import * as fs from 'fs';
 
-import { GeyserSubscriber, HarvestJob } from './geyser-subscriber';
+import { GeyserSubscriber, HarvestJob, PositionChangedEvent } from './geyser-subscriber';
 import { HarvestExecutor } from './harvest-executor';
 import { MonkeKeeper } from './keeper';
 import { RelayServer, FeePipelineState } from './relay-server';
@@ -36,6 +36,107 @@ import { getDLMMCacheSize, getDLMM } from './meteora-accounts';
 import * as path from 'path';
 
 dotenv.config({ path: path.join(__dirname, '.env') });
+
+// ═══ ADDRESS BOOK STORE ═══
+
+interface AddressBookEntry {
+  wallet: string;
+  pair: string;
+  firstSeen: number;
+  lastActive: number;
+  openPositions: number;
+  totalPositionsOpened: number;
+  closed: boolean;
+}
+
+export class AddressBookStore {
+  private entries: Map<string, AddressBookEntry> = new Map();
+  private filePath: string;
+  private dirty = false;
+  private saveTimer: NodeJS.Timeout | null = null;
+
+  constructor(dataDir: string) {
+    this.filePath = path.join(dataDir, 'addressbook.json');
+    this.load();
+    this.saveTimer = setInterval(() => this.save(), 30_000);
+  }
+
+  private key(wallet: string, pair: string): string {
+    return `${wallet}:${pair}`;
+  }
+
+  private load(): void {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
+        for (const entry of raw) {
+          this.entries.set(this.key(entry.wallet, entry.pair), entry);
+        }
+        logger.info(`[addressbook] Loaded ${this.entries.size} entries`);
+      }
+    } catch (e: any) {
+      logger.warn(`[addressbook] Failed to load: ${e.message}`);
+    }
+  }
+
+  save(): void {
+    if (!this.dirty) return;
+    try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.filePath, JSON.stringify([...this.entries.values()], null, 2));
+      this.dirty = false;
+    } catch (e: any) {
+      logger.warn(`[addressbook] Failed to save: ${e.message}`);
+    }
+  }
+
+  upsert(wallet: string, pair: string): void {
+    const k = this.key(wallet, pair);
+    const existing = this.entries.get(k);
+    if (existing) {
+      existing.lastActive = Math.floor(Date.now() / 1000);
+      existing.openPositions++;
+      existing.totalPositionsOpened++;
+      existing.closed = false;
+    } else {
+      this.entries.set(k, {
+        wallet,
+        pair,
+        firstSeen: Math.floor(Date.now() / 1000),
+        lastActive: Math.floor(Date.now() / 1000),
+        openPositions: 1,
+        totalPositionsOpened: 1,
+        closed: false,
+      });
+    }
+    this.dirty = true;
+  }
+
+  markClosed(wallet: string, pair: string): void {
+    const k = this.key(wallet, pair);
+    const existing = this.entries.get(k);
+    if (existing) {
+      existing.openPositions = Math.max(0, existing.openPositions - 1);
+      existing.lastActive = Math.floor(Date.now() / 1000);
+      if (existing.openPositions === 0) existing.closed = true;
+      this.dirty = true;
+    }
+  }
+
+  getForWallet(wallet: string): AddressBookEntry[] {
+    const results: AddressBookEntry[] = [];
+    for (const entry of this.entries.values()) {
+      if (entry.wallet === wallet) results.push(entry);
+    }
+    return results;
+  }
+
+  shutdown(): void {
+    if (this.saveTimer) clearInterval(this.saveTimer);
+    this.save();
+  }
+}
 
 // ═══ CONFIG ═══
 
@@ -132,6 +233,7 @@ class HarvestBot {
   private executor!: HarvestExecutor;
   private keeper!: MonkeKeeper;
   private relay!: RelayServer;
+  private addressBookStore!: AddressBookStore;
 
   // Timers
   private keeperTimer: NodeJS.Timeout | null = null;
@@ -164,6 +266,7 @@ class HarvestBot {
 
     if (this.subscriber) await this.subscriber.shutdown();
     if (this.executor) await this.executor.shutdown();
+    if (this.addressBookStore) this.addressBookStore.shutdown();
 
     logger.info('Shutdown complete.');
     process.exit(0);
@@ -497,6 +600,11 @@ class HarvestBot {
       logger.info(`[relay] WebSocket relay on :${HEALTH_PORT}/ws, REST on :${HEALTH_PORT}/api/*`);
     }
 
+    // Address book store (persistent user pool history)
+    const dataDir = path.join(__dirname, 'data');
+    this.addressBookStore = new AddressBookStore(dataDir);
+    this.relay.setAddressBookStore(this.addressBookStore);
+
     // Wire keeper rover TVL computation to relay
     this.keeper.onRoverTvlComputed = (entries) => {
       this.relay?.updateRoverTvl(entries.map(e => ({
@@ -528,6 +636,18 @@ class HarvestBot {
     });
     this.executor.on('positionClosed', (data: any) => {
       this.relay?.broadcast('positionClosed', data);
+    });
+
+    // Wire position changes to address book
+    this.subscriber.on('positionChanged', (evt: PositionChangedEvent) => {
+      if (!evt.position) return;
+      const wallet = evt.position.owner.toBase58();
+      const pair = evt.position.lbPair.toBase58();
+      if (evt.action === 'created') {
+        this.addressBookStore.upsert(wallet, pair);
+      } else if (evt.action === 'closed') {
+        this.addressBookStore.markClosed(wallet, pair);
+      }
     });
 
     // Start safety-net polling (5 min fallback for harvests)

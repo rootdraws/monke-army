@@ -256,6 +256,9 @@
     /* ─── ORDER FORM ─── inside trade-right-panel */
 
     .pool-section {
+      display: flex; flex-direction: column; gap: 0;
+    }
+    .pool-search-row {
       display: flex; gap: 0;
     }
     .pool-input {
@@ -276,6 +279,75 @@
     }
     .load-btn:hover { color: var(--fg); }
     .load-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* ─── POOL DISCOVERY ─── */
+
+    .pool-discovery {
+      display: flex; flex-direction: column; gap: 6px;
+      margin-bottom: 6px;
+    }
+    .pool-discovery:empty { display: none; margin: 0; }
+
+    .discovery-label {
+      font-size: 9px; color: var(--faint); letter-spacing: 2px;
+      text-transform: uppercase; margin-bottom: 2px;
+    }
+
+    .trending-feed, .addressbook-active, .addressbook-recent {
+      display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    }
+    .trending-feed:empty, .addressbook-active:empty, .addressbook-recent:empty {
+      display: none;
+    }
+
+    .trending-pill, .addressbook-pill {
+      background: transparent;
+      border: 1px solid var(--faint);
+      border-radius: 12px;
+      padding: 3px 10px;
+      color: var(--dim);
+      font-size: 10px; font-family: inherit; font-weight: 300;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+      white-space: nowrap;
+    }
+    .trending-pill:hover, .addressbook-pill:hover {
+      border-color: var(--dim); color: var(--fg);
+    }
+    .active-pill {
+      border-color: var(--buy);
+      color: var(--buy);
+    }
+    .active-pill:hover {
+      border-color: var(--fg); color: var(--fg);
+    }
+
+    .pill-vol, .pill-meta {
+      font-size: 9px; color: var(--faint); margin-left: 4px;
+    }
+
+    .pool-picker {
+      display: flex; flex-direction: column; gap: 2px;
+      margin-top: 4px;
+      max-height: 200px; overflow-y: auto;
+    }
+    .picker-row {
+      display: flex; justify-content: space-between; align-items: center;
+      background: transparent;
+      border: 1px solid var(--faint);
+      border-radius: 4px;
+      padding: 6px 10px;
+      color: var(--dim);
+      font-size: 11px; font-family: inherit; font-weight: 300;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .picker-row:hover {
+      border-color: var(--dim); color: var(--fg);
+    }
+    .picker-name { font-weight: 400; }
+    .picker-meta { font-size: 9px; color: var(--faint); }
 
     .pool-info {
       display: none; gap: 16px;

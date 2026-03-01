@@ -372,6 +372,14 @@ export class GeyserSubscriber extends EventEmitter {
     return this.positions.size;
   }
 
+  getPositionsForWallet(wallet: string): PositionInfo[] {
+    const results: PositionInfo[] = [];
+    for (const pos of this.positions.values()) {
+      if (pos.owner.toBase58() === wallet) results.push(pos);
+    }
+    return results;
+  }
+
   /** Get parsed pool metadata (mints, reserves, token program flags) from last gRPC update */
   getPoolInfo(lbPair: string): LbPairInfo | undefined {
     return this.poolInfo.get(lbPair);
@@ -463,11 +471,13 @@ export class GeyserSubscriber extends EventEmitter {
   handlePositionUpdate(positionPDA: string, data: Buffer | null): void {
     if (data === null || data.length === 0) {
       // Position closed / account deleted
-      if (this.positions.has(positionPDA)) {
+      const closedPos = this.positions.get(positionPDA);
+      if (closedPos) {
         this.removePosition(positionPDA);
         this.emit('positionChanged', {
           positionPDA,
           action: 'closed',
+          position: closedPos,
         } as PositionChangedEvent);
         logger.info(`[geyser] Position removed: ${positionPDA.slice(0, 8)}`);
       }
@@ -490,6 +500,15 @@ export class GeyserSubscriber extends EventEmitter {
       this.rebuildInFlight = true;
       const poolCountBefore = this.positionsByPool.size;
       this.buildRegistry().then(() => {
+        // Emit created event if position now exists after rebuild
+        const newPos = this.positions.get(positionPDA);
+        if (newPos) {
+          this.emit('positionChanged', {
+            positionPDA,
+            action: 'created',
+            position: newPos,
+          } as PositionChangedEvent);
+        }
         // If new pools appeared, reconnect to update gRPC subscription
         if (this.positionsByPool.size > poolCountBefore) {
           logger.info(`[geyser] New pool(s) detected — reconnecting to update subscription`);

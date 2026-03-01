@@ -23,6 +23,7 @@ import type { HarvestExecutor } from './harvest-executor';
 import type { MonkeKeeper } from './keeper';
 import { getDLMM } from './meteora-accounts';
 import { logger } from './logger';
+import type { AddressBookStore } from './anchor-harvest-bot';
 
 // ═══ TYPES ═══
 
@@ -85,6 +86,12 @@ export class RelayServer {
   private feedEvents: RelayEvent[] = [];
   private static MAX_FEED_EVENTS = 200;
 
+  // Address book
+  private addressBookStore: AddressBookStore | null = null;
+  private meteoraCache: Map<string, { data: any; ts: number }> = new Map();
+  private static METEORA_CACHE_TTL = 5 * 60 * 1000;
+  private static METEORA_API_BASE = 'https://dlmm.datapi.meteora.ag';
+
   constructor(
     subscriber: GeyserSubscriber,
     executor: HarvestExecutor,
@@ -101,6 +108,10 @@ export class RelayServer {
     this.coreProgramId = coreProgramId;
     this.botWalletProvider = botWalletProvider ?? null;
     this.feeProvider = feeProvider ?? null;
+  }
+
+  setAddressBookStore(store: AddressBookStore): void {
+    this.addressBookStore = store;
   }
 
   /**
@@ -208,6 +219,9 @@ export class RelayServer {
           return true;
         case '/api/user-bins':
           this.handleUserBins(url, res);
+          return true;
+        case '/api/addressbook':
+          this.handleAddressBook(url, res);
           return true;
         default:
           // Check for /api/pools/{address}
@@ -391,6 +405,113 @@ export class RelayServer {
     } catch (e: any) {
       logger.error(`[relay] Fee pipeline query error: ${e.message}`);
       this.json(res, 500, { error: 'Failed to query fee pipeline' });
+    }
+  }
+
+  // ─── ADDRESS BOOK ───
+
+  private async fetchMeteoraPoolData(poolAddress: string): Promise<any | null> {
+    const cached = this.meteoraCache.get(poolAddress);
+    if (cached && Date.now() - cached.ts < RelayServer.METEORA_CACHE_TTL) {
+      return cached.data;
+    }
+    try {
+      const resp = await fetch(`${RelayServer.METEORA_API_BASE}/pools/${poolAddress}`);
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      this.meteoraCache.set(poolAddress, { data, ts: Date.now() });
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  private async handleAddressBook(url: URL, res: ServerResponse): Promise<void> {
+    const wallet = url.searchParams.get('wallet');
+    if (!wallet) {
+      this.json(res, 400, { error: 'Missing wallet query parameter' });
+      return;
+    }
+
+    try {
+      new PublicKey(wallet);
+    } catch {
+      this.json(res, 400, { error: 'Invalid wallet address' });
+      return;
+    }
+
+    try {
+      const livePositions = this.subscriber.getPositionsForWallet(wallet);
+      const activePoolMap = new Map<string, number>();
+      for (const pos of livePositions) {
+        const pool = pos.lbPair.toBase58();
+        activePoolMap.set(pool, (activePoolMap.get(pool) || 0) + 1);
+      }
+
+      const entries = this.addressBookStore?.getForWallet(wallet) || [];
+
+      const activePools: any[] = [];
+      const recentPools: any[] = [];
+
+      const enrichPromises = [...new Set(entries.map(e => e.pair).concat([...activePoolMap.keys()]))].map(
+        pair => this.fetchMeteoraPoolData(pair).then(data => [pair, data] as [string, any])
+      );
+      const enriched = new Map(await Promise.all(enrichPromises));
+
+      for (const entry of entries) {
+        const liveCount = activePoolMap.get(entry.pair) || 0;
+        const meteoraData = enriched.get(entry.pair);
+        const name = meteoraData?.name || entry.pair.slice(0, 8) + '...';
+        const vol24h = meteoraData?.volume?.['24h'] || 0;
+        const tvl = meteoraData?.tvl || 0;
+
+        const item = {
+          pair: entry.pair,
+          name,
+          openPositions: liveCount,
+          lastActive: entry.lastActive,
+          totalPositions: entry.totalPositionsOpened,
+          volume24h: vol24h,
+          tvl,
+        };
+
+        if (liveCount > 0) {
+          activePools.push(item);
+        } else {
+          const fourteenDays = 14 * 24 * 60 * 60;
+          const isRecent = (Math.floor(Date.now() / 1000) - entry.lastActive) < fourteenDays;
+          const isAlive = vol24h > 0 || tvl > 100;
+          if (isRecent && isAlive) {
+            recentPools.push(item);
+          }
+        }
+      }
+
+      for (const [pool, count] of activePoolMap) {
+        if (!entries.some(e => e.pair === pool)) {
+          const meteoraData = enriched.get(pool);
+          activePools.push({
+            pair: pool,
+            name: meteoraData?.name || pool.slice(0, 8) + '...',
+            openPositions: count,
+            lastActive: Math.floor(Date.now() / 1000),
+            totalPositions: count,
+            volume24h: meteoraData?.volume?.['24h'] || 0,
+            tvl: meteoraData?.tvl || 0,
+          });
+        }
+      }
+
+      activePools.sort((a, b) => b.lastActive - a.lastActive);
+      recentPools.sort((a, b) => b.lastActive - a.lastActive);
+
+      this.json(res, 200, {
+        active: activePools,
+        recent: recentPools.slice(0, 10),
+      });
+    } catch (e: any) {
+      logger.error(`[relay] /api/addressbook error: ${e.message}`);
+      this.json(res, 500, { error: 'Failed to fetch address book' });
     }
   }
 

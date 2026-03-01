@@ -637,6 +637,10 @@ const state = {
   // Positions (fetched from chain in prod, mock for demo)
   positions: [],
 
+  // Pool discovery
+  addressBook: { active: [], recent: [] },
+  trendingPools: [],
+
   // Navigation
   currentPage: 0,
   currentSubPage: 'monke',
@@ -878,6 +882,7 @@ async function connectWallet(walletId) {
     loadBinVizData();
     renderMonkeList();
     updateFee();
+    loadAddressBook();
   } catch (err) {
     console.error('Wallet connection failed:', err);
     if (btn) btn.textContent = 'connect wallet';
@@ -894,6 +899,8 @@ async function disconnectWallet() {
   state.publicKey = null;
   state.wallet = null;
   state.walletName = null;
+  state.addressBook = { active: [], recent: [] };
+  renderAddressBook();
 
   // Clear wallet bridge
   window.__monkeWallet = null;
@@ -1015,16 +1022,192 @@ async function resolveTokenSymbol(mintPubkey) {
   return addr.slice(0, 4) + '...' + addr.slice(-4);
 }
 
+// ============================================================
+// POOL DISCOVERY — Meteora DataPI + address book
+// ============================================================
+
+const METEORA_API_BASE = () => CONFIG.METEORA_API_URL || 'https://dlmm.datapi.meteora.ag';
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+function formatVolume(v) {
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
+  return '$' + Math.round(v);
+}
+
+function timeAgo(ts) {
+  const diff = (Date.now() / 1000) - ts;
+  if (diff < 3600) return Math.round(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.round(diff / 3600) + 'h ago';
+  if (diff < 172800) return 'yesterday';
+  return Math.round(diff / 86400) + 'd ago';
+}
+
+async function fetchTrendingPools() {
+  try {
+    const resp = await fetch(`${METEORA_API_BASE()}/pools?sort_by=volume_24h:desc&page_size=10`);
+    if (!resp.ok) return;
+    const { data } = await resp.json();
+    state.trendingPools = (data || []).filter(p => !p.is_blacklisted);
+    renderTrendingFeed();
+  } catch {
+    if (CONFIG.DEBUG) console.warn('[discovery] Trending feed unavailable');
+  }
+}
+
+async function resolveTokenToPools(mintAddress) {
+  const keys = [SOL_MINT, USDC_MINT].map(quote => {
+    return [mintAddress, quote].sort().join('-');
+  });
+
+  const fetches = keys.map(key =>
+    fetch(`${METEORA_API_BASE()}/pools/groups/${key}?sort_by=volume_24h:desc&page_size=5`)
+      .then(r => r.ok ? r.json() : { data: [] })
+      .catch(() => ({ data: [] }))
+  );
+
+  const results = await Promise.all(fetches);
+  const allPools = results.flatMap(r => r.data || []);
+  allPools.sort((a, b) => (b.volume?.['24h'] || 0) - (a.volume?.['24h'] || 0));
+
+  if (allPools.length === 0) {
+    showToast('No DLMM pools found for this token', 'error');
+    return;
+  }
+
+  for (const p of allPools) {
+    if (p.token_x?.symbol) KNOWN_TOKENS[p.token_x.address] = p.token_x.symbol;
+    if (p.token_y?.symbol) KNOWN_TOKENS[p.token_y.address] = p.token_y.symbol;
+  }
+
+  if (allPools.length === 1) {
+    document.getElementById('poolAddress').value = allPools[0].address;
+    loadPool();
+    return;
+  }
+  renderPoolPicker(allPools);
+}
+
+function renderTrendingFeed() {
+  const container = document.getElementById('trendingFeed');
+  if (!container) return;
+  if (!state.trendingPools.length) { container.innerHTML = ''; return; }
+
+  container.innerHTML = state.trendingPools.slice(0, 8).map(p => {
+    const vol = formatVolume(p.volume?.['24h'] || 0);
+    const name = p.name || '???';
+    return `<button class="trending-pill" data-pool="${p.address}" title="${name} · ${vol} 24h vol">${name} <span class="pill-vol">${vol}</span></button>`;
+  }).join('');
+
+  container.querySelectorAll('.trending-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      const addr = pill.dataset.pool;
+      document.getElementById('poolAddress').value = addr;
+      hidePoolPicker();
+      loadPool();
+    });
+  });
+}
+
+function renderPoolPicker(pools) {
+  const container = document.getElementById('poolPicker');
+  if (!container) return;
+
+  container.innerHTML = pools.slice(0, 8).map(p => {
+    const name = p.name || `${p.token_x?.symbol || '?'}/${p.token_y?.symbol || '?'}`;
+    const binStep = p.pool_config?.bin_step || '?';
+    const vol = formatVolume(p.volume?.['24h'] || 0);
+    const tvl = formatVolume(p.tvl || 0);
+    return `<button class="picker-row" data-pool="${p.address}">
+      <span class="picker-name">${name}</span>
+      <span class="picker-meta">bin ${binStep} · ${vol} vol · ${tvl} tvl</span>
+    </button>`;
+  }).join('');
+
+  container.style.display = 'block';
+
+  container.querySelectorAll('.picker-row').forEach(row => {
+    row.addEventListener('click', () => {
+      document.getElementById('poolAddress').value = row.dataset.pool;
+      hidePoolPicker();
+      loadPool();
+    });
+  });
+}
+
+function hidePoolPicker() {
+  const picker = document.getElementById('poolPicker');
+  if (picker) picker.style.display = 'none';
+}
+
+function renderAddressBook() {
+  const activeContainer = document.getElementById('addressBookActive');
+  const recentContainer = document.getElementById('addressBookRecent');
+
+  if (activeContainer) {
+    if (state.addressBook.active.length) {
+      activeContainer.innerHTML = '<div class="discovery-label">open positions</div>' +
+        state.addressBook.active.map(p =>
+          `<button class="addressbook-pill active-pill" data-pool="${p.pair}" title="${p.name}">
+            ${p.name} <span class="pill-meta">${p.openPositions} pos</span>
+          </button>`
+        ).join('');
+      activeContainer.querySelectorAll('.addressbook-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          document.getElementById('poolAddress').value = pill.dataset.pool;
+          hidePoolPicker();
+          loadPool();
+        });
+      });
+    } else {
+      activeContainer.innerHTML = '';
+    }
+  }
+
+  if (recentContainer) {
+    if (state.addressBook.recent.length) {
+      recentContainer.innerHTML = '<div class="discovery-label">recent</div>' +
+        state.addressBook.recent.map(p =>
+          `<button class="addressbook-pill recent-pill" data-pool="${p.pair}" title="${p.name} · ${timeAgo(p.lastActive)}">
+            ${p.name} <span class="pill-meta">${timeAgo(p.lastActive)}</span>
+          </button>`
+        ).join('');
+      recentContainer.querySelectorAll('.addressbook-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          document.getElementById('poolAddress').value = pill.dataset.pool;
+          hidePoolPicker();
+          loadPool();
+        });
+      });
+    } else {
+      recentContainer.innerHTML = '';
+    }
+  }
+}
+
+async function loadAddressBook() {
+  if (!state.connected || !state.publicKey) return;
+  const data = await relayFetch('/api/addressbook?wallet=' + state.publicKey.toBase58());
+  if (data) {
+    state.addressBook = { active: data.active || [], recent: data.recent || [] };
+    renderAddressBook();
+  }
+}
+
 async function loadPool() {
   const addr = document.getElementById('poolAddress')?.value.trim();
-  if (!addr) { showToast('Enter a DLMM pool address', 'error'); return; }
+  if (!addr) { showToast('Enter a token or pool address', 'error'); return; }
 
   const btn = document.getElementById('loadPool');
   if (btn) { btn.textContent = 'loading...'; btn.disabled = true; }
 
   try {
-    try { new solanaWeb3.PublicKey(addr); }
+    let pubkey;
+    try { pubkey = new solanaWeb3.PublicKey(addr); }
     catch { throw new Error('Invalid Solana address'); }
+
+    hidePoolPicker();
 
     // Try bot relay first (LaserStream-backed, sub-second data)
     const relayData = await relayFetch(`/api/pools/${addr}`);
@@ -1043,20 +1226,30 @@ async function loadPool() {
         state.tokenYMint = poolData.tokenYMint.toBase58();
       }
     } else {
-      // Fallback: direct RPC — parse raw lb_pair account bytes
-      const pool = await parseLbPair(addr);
-      const [symX, symY] = await Promise.all([
-        resolveTokenSymbol(pool.tokenXMint),
-        resolveTokenSymbol(pool.tokenYMint),
-      ]);
+      // Try direct RPC — parse raw lb_pair account bytes
+      const conn = state.connection || new solanaWeb3.Connection(CONFIG.HELIUS_RPC_URL || CONFIG.RPC_URL, 'confirmed');
+      const accountInfo = await conn.getAccountInfo(pubkey);
+      if (!accountInfo) throw new Error('Account not found — check the address');
 
-      state.poolAddress = addr;
-      state.activeBin = pool.activeId;
-      state.binStep = pool.binStep;
-      state.tokenXSymbol = symX;
-      state.tokenYSymbol = symY;
-      state.tokenXMint = pool.tokenXMint.toBase58();
-      state.tokenYMint = pool.tokenYMint.toBase58();
+      if (accountInfo.data.length === LBPAIR_EXPECTED_SIZE) {
+        const pool = await parseLbPair(addr);
+        const [symX, symY] = await Promise.all([
+          resolveTokenSymbol(pool.tokenXMint),
+          resolveTokenSymbol(pool.tokenYMint),
+        ]);
+        state.poolAddress = addr;
+        state.activeBin = pool.activeId;
+        state.binStep = pool.binStep;
+        state.tokenXSymbol = symX;
+        state.tokenYSymbol = symY;
+        state.tokenXMint = pool.tokenXMint.toBase58();
+        state.tokenYMint = pool.tokenYMint.toBase58();
+      } else {
+        // Not an lb_pair — likely a token mint. Resolve to DLMM pools.
+        if (btn) { btn.textContent = 'searching...'; }
+        await resolveTokenToPools(addr);
+        return;
+      }
     }
 
     // Fetch decimals before price computation (needed for atomic → human normalization)
@@ -3462,6 +3655,8 @@ async function init() {
   renderBountyBoard();
   renderReconPools();
   renderReconTop5();
+
+  fetchTrendingPools();
 
   if (CONFIG.DEFAULT_POOL) {
     const poolInput = document.getElementById('poolAddress');
