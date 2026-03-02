@@ -89,10 +89,11 @@ function asSigner(pubkeyOrAddress) {
   };
 }
 
-/** Pre-simulate tx with sigVerify:false before presenting to Phantom.
+/** Pre-simulate unsigned tx before presenting to Phantom.
+ *  web3.js v1 sends sigVerify:false automatically for unsigned legacy txs.
  *  Catches on-chain failures early — failed simulations trigger Lighthouse warnings. */
 async function preSimulate(tx) {
-  const sim = await state.connection.simulateTransaction(tx, { sigVerify: false });
+  const sim = await state.connection.simulateTransaction(tx);
   if (sim.value.err) {
     const errStr = JSON.stringify(sim.value.err);
     if (CONFIG.DEBUG) console.error('[monke] Pre-simulation failed:', errStr, sim.value.logs);
