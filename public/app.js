@@ -92,7 +92,7 @@ function asSigner(pubkeyOrAddress) {
 /** Pre-simulate tx with sigVerify:false before presenting to Phantom.
  *  Catches on-chain failures early — failed simulations trigger Lighthouse warnings. */
 async function preSimulate(tx) {
-  const sim = await state.connection.simulateTransaction(tx);
+  const sim = await state.connection.simulateTransaction(tx, { sigVerify: false });
   if (sim.value.err) {
     const errStr = JSON.stringify(sim.value.err);
     if (CONFIG.DEBUG) console.error('[monke] Pre-simulation failed:', errStr, sim.value.logs);
@@ -100,11 +100,11 @@ async function preSimulate(tx) {
   }
 }
 
-/** Sign + send: pre-simulate, then present to Phantom clean. */
-async function walletSendTransaction(tx, options = {}) {
+/** Sign + send: pre-simulate, then let Phantom handle signing + submission. */
+async function walletSendTransaction(tx) {
   await preSimulate(tx);
-  const signed = await state.wallet.signTransaction(tx);
-  return await state.connection.sendRawTransaction(signed.serialize(), options);
+  const { signature } = await state.wallet.signAndSendTransaction(tx);
+  return signature;
 }
 
 /** Wrap RPC account data as an EncodedAccount for Codama decoders */
@@ -1981,10 +1981,9 @@ async function createPosition() {
     tx.feePayer = user;
 
     await preSimulate(tx);
+    tx.partialSign(meteoraPositionKeypair);
     showToast('Approve in wallet...', 'info');
-    const signed = await state.wallet.signTransaction(tx);
-    signed.partialSign(meteoraPositionKeypair);
-    const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+    const { signature: sig } = await state.wallet.signAndSendTransaction(tx);
     showToast('Confirming...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 
@@ -2153,7 +2152,7 @@ async function closePosition(index) {
     tx.feePayer = user;
 
     showToast('Approve in wallet...', 'info');
-    const sig = await walletSendTransaction(tx, { skipPreflight: true });
+    const sig = await walletSendTransaction(tx);
     showToast('Confirming...', 'info');
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 
@@ -2241,7 +2240,7 @@ async function closePositionDirect(pos) {
   tx.feePayer = user;
 
   showToast('Approve in wallet...', 'info');
-  const sig = await walletSendTransaction(tx, { skipPreflight: true });
+  const sig = await walletSendTransaction(tx);
   showToast('Confirming...', 'info');
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
   if (CONFIG.DEBUG) console.log(`[monke] Close tx: ${sig}`);
@@ -3237,7 +3236,7 @@ async function handleHarvestPosition(positionPDAStr, lbPairStr, ownerStr, side) 
   tx.recentBlockhash = blockhash; tx.lastValidBlockHeight = lastValidBlockHeight; tx.feePayer = user;
 
   showToast('Approve harvest...', 'info');
-  const sig = await walletSendTransaction(tx, { skipPreflight: true });
+  const sig = await walletSendTransaction(tx);
   showToast('Confirming harvest...', 'info');
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 }

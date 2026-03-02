@@ -22,7 +22,7 @@ Run with bot active and wallet connected. 0.01-0.1 SOL per test.
 
 ## Feature work
 
-- [ ] **Resolve Phantom blockage** — Lighthouse still flags all txs. Pre-simulation with `sigVerify:false` added, domain review form submitted, code snippets sent to Joey (Phantom support ticket #190752). Awaiting response. If warnings persist, escalate or investigate ALTs for large txs.
+- [x] **Resolve Phantom blockage** — Switched all single-signer flows to `signAndSendTransaction`, fixed `preSimulate` to pass `sigVerify: false`, refactored open-position multi-signer to `partialSign` keypair first then `signAndSendTransaction`, removed all `skipPreflight: true`. Per Phantom support ticket #190752 (Joey). Verify warning is gone in E2E.
 - [x] **$PEGGED LST integration** — SPL stake pool deployed (`SVhYu...`), $PEGGED mint live (`3wJYu...`), bridge program deployed + initialized (`7oHSU...`), monke_bananas upgraded with deposit_pegged/claim_pegged, set_pegged_mint called, revenue_dest redirect proposed. Bot keeper + frontend + relay code updated.
   - [ ] **apply_revenue_dest()** — 24hr timelock from propose (ran ~Mar 1 evening). Call after timelock expires to finalize the redirect.
   - [ ] **$PEGGED token metadata** — Set name/symbol/icon via Metaplex `CreateMetadataAccountV3` on mint `3wJYuCVWvNj4aWh5nBdZ782Wz8xVzW74CXr8UepZMG4j`.
