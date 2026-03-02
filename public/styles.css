@@ -40,9 +40,6 @@
     .corner.top-right { top: 10px; right: 10px; }
     .corner.bottom-left { bottom: 10px; left: 10px; }
     .corner.bottom-right { bottom: 10px; right: 10px; }
-    /* On positions page, corners lift above the bottom panel */
-    body.on-trade .corner.bottom-left { bottom: 20px; }
-    body.on-trade .corner.bottom-right { bottom: 20px; }
 
     .hoverable { pointer-events: all; cursor: pointer; transition: stroke 0.3s ease; }
     .hoverable:hover { stroke: #B0A498; }
@@ -144,7 +141,7 @@
 
     .sigil-nav {
       position: fixed;
-      bottom: 25px; left: 50%; transform: translateX(-50%);
+      bottom: 30px; left: 50%; transform: translateX(-50%);
       width: 280px; height: 100px;
       z-index: 100; pointer-events: none;
     }
