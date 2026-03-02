@@ -101,9 +101,8 @@ async function preSimulate(tx) {
   }
 }
 
-/** Sign + send: pre-simulate, then let Phantom handle signing + submission. */
+/** Sign + send: let Phantom handle simulation + signing + submission. */
 async function walletSendTransaction(tx) {
-  await preSimulate(tx);
   const { signature } = await state.wallet.signAndSendTransaction(tx);
   return signature;
 }
@@ -1981,7 +1980,6 @@ async function createPosition() {
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
-    await preSimulate(tx);
     tx.partialSign(meteoraPositionKeypair);
     showToast('Approve in wallet...', 'info');
     const { signature: sig } = await state.wallet.signAndSendTransaction(tx);
