@@ -119,7 +119,12 @@ function asSigner(pubkeyOrAddress) {
 /** Sign + send via Phantom Connect SDK. */
 async function walletSendTransaction(tx) {
   const result = await phantomSDK.solana.signAndSendTransaction(tx);
-  return result.hash;
+  const sig = result?.signature || result?.hash || (typeof result === 'string' ? result : undefined);
+  if (!sig) {
+    console.warn('[monke] signAndSendTransaction result:', JSON.stringify(result));
+    throw new Error('Wallet returned no transaction signature');
+  }
+  return sig;
 }
 
 /** Wrap RPC account data as an EncodedAccount for Codama decoders */
