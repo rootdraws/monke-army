@@ -12,6 +12,7 @@ export * from './claimPegged';
 export * from './compostMonke';
 export * from './depositPegged';
 export * from './depositSol';
+export * from './feedGoose';
 export * from './feedMonke';
 export * from './initialize';
 export * from './pause';

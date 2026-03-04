@@ -50,11 +50,20 @@ export const MONKE_BANANAS_ERROR__NFT_NOT_BURNED = 0x177f; // 6015
 export const MONKE_BANANAS_ERROR__PEGGED_NOT_CONFIGURED = 0x1780; // 6016
 /** InvalidTokenAccount: Invalid token account owner */
 export const MONKE_BANANAS_ERROR__INVALID_TOKEN_ACCOUNT = 0x1781; // 6017
+/** GooseDaoMembershipRequired: Wallet does not hold a GooseDAO Core NFT (required on first feed) */
+export const MONKE_BANANAS_ERROR__GOOSE_DAO_MEMBERSHIP_REQUIRED = 0x1782; // 6018
+/** InvalidGooseCollection: Pixel goose NFT is not from the gooseswtf collection */
+export const MONKE_BANANAS_ERROR__INVALID_GOOSE_COLLECTION = 0x1783; // 6019
+/** InvalidCoreAsset: Invalid Metaplex Core asset account */
+export const MONKE_BANANAS_ERROR__INVALID_CORE_ASSET = 0x1784; // 6020
 
 export type MonkeBananasError =
   | typeof MONKE_BANANAS_ERROR__COLLECTION_NOT_VERIFIED
+  | typeof MONKE_BANANAS_ERROR__GOOSE_DAO_MEMBERSHIP_REQUIRED
   | typeof MONKE_BANANAS_ERROR__INSUFFICIENT_VAULT_BALANCE
   | typeof MONKE_BANANAS_ERROR__INVALID_COLLECTION
+  | typeof MONKE_BANANAS_ERROR__INVALID_CORE_ASSET
+  | typeof MONKE_BANANAS_ERROR__INVALID_GOOSE_COLLECTION
   | typeof MONKE_BANANAS_ERROR__INVALID_METADATA
   | typeof MONKE_BANANAS_ERROR__INVALID_MINT
   | typeof MONKE_BANANAS_ERROR__INVALID_NFT_MINT
@@ -75,8 +84,11 @@ let monkeBananasErrorMessages: Record<MonkeBananasError, string> | undefined;
 if (process.env.NODE_ENV !== 'production') {
   monkeBananasErrorMessages = {
     [MONKE_BANANAS_ERROR__COLLECTION_NOT_VERIFIED]: `NFT collection is not verified`,
+    [MONKE_BANANAS_ERROR__GOOSE_DAO_MEMBERSHIP_REQUIRED]: `Wallet does not hold a GooseDAO Core NFT (required on first feed)`,
     [MONKE_BANANAS_ERROR__INSUFFICIENT_VAULT_BALANCE]: `Insufficient SOL in program vault — wait for next deposit_sol`,
     [MONKE_BANANAS_ERROR__INVALID_COLLECTION]: `NFT is not from the SMB Gen2 or Gen3 collection`,
+    [MONKE_BANANAS_ERROR__INVALID_CORE_ASSET]: `Invalid Metaplex Core asset account`,
+    [MONKE_BANANAS_ERROR__INVALID_GOOSE_COLLECTION]: `Pixel goose NFT is not from the gooseswtf collection`,
     [MONKE_BANANAS_ERROR__INVALID_METADATA]: `Invalid metadata account`,
     [MONKE_BANANAS_ERROR__INVALID_MINT]: `Invalid token mint`,
     [MONKE_BANANAS_ERROR__INVALID_NFT_MINT]: `Invalid NFT mint`,

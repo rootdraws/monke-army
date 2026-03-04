@@ -619,6 +619,7 @@
     }
     .carousel-frame .nft-gen-tag.gen2 { color: var(--bananas); }
     .carousel-frame .nft-gen-tag.gen3 { color: var(--dim); }
+    .carousel-frame .nft-gen-tag.goose { color: #e0e0e0; }
     .carousel-arrow {
       background: none; border: none; color: var(--dim);
       cursor: pointer; font-size: 15px; padding: 4px;
@@ -670,6 +671,7 @@
     }
     .monke-row .gen-badge.gen2 { color: var(--bananas); }
     .monke-row .gen-badge.gen3 { color: var(--dim); }
+    .monke-row .gen-badge.goose { color: #e0e0e0; }
     .claimable { color: var(--mint); }
 
     .monke-top-triptych {

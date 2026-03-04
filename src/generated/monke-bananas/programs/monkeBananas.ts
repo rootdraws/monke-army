@@ -20,6 +20,7 @@ import {
   type ParsedCompostMonkeInstruction,
   type ParsedDepositPeggedInstruction,
   type ParsedDepositSolInstruction,
+  type ParsedFeedGooseInstruction,
   type ParsedFeedMonkeInstruction,
   type ParsedInitializeInstruction,
   type ParsedPauseInstruction,
@@ -74,6 +75,7 @@ export enum MonkeBananasInstruction {
   CompostMonke,
   DepositPegged,
   DepositSol,
+  FeedGoose,
   FeedMonke,
   Initialize,
   Pause,
@@ -151,6 +153,17 @@ export function identifyMonkeBananasInstruction(
     )
   ) {
     return MonkeBananasInstruction.DepositSol;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([12, 170, 226, 206, 181, 235, 214, 227])
+      ),
+      0
+    )
+  ) {
+    return MonkeBananasInstruction.FeedGoose;
   }
   if (
     containsBytes(
@@ -244,6 +257,9 @@ export type ParsedMonkeBananasInstruction<
   | ({
       instructionType: MonkeBananasInstruction.DepositSol;
     } & ParsedDepositSolInstruction<TProgram>)
+  | ({
+      instructionType: MonkeBananasInstruction.FeedGoose;
+    } & ParsedFeedGooseInstruction<TProgram>)
   | ({
       instructionType: MonkeBananasInstruction.FeedMonke;
     } & ParsedFeedMonkeInstruction<TProgram>)

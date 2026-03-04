@@ -634,6 +634,129 @@
       "args": []
     },
     {
+      "name": "feed_goose",
+      "docs": [
+        "Feed a gooseswtf pixel goose. Burns BANANAS_PER_FEED and increments weight by 1.",
+        "On first feed (share_weight == 0), GooseDAO Core membership is required.",
+        "On subsequent feeds, membership is not checked (once in, always in)."
+      ],
+      "discriminator": [
+        12,
+        170,
+        226,
+        206,
+        181,
+        235,
+        214,
+        227
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  110,
+                  107,
+                  101,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "goose_nft_mint",
+          "docs": [
+            "The gooseswtf pixel goose NFT mint"
+          ]
+        },
+        {
+          "name": "goose_nft_metadata"
+        },
+        {
+          "name": "user_goose_nft_account",
+          "docs": [
+            "User's pixel goose token account — proves ownership (balance must be 1)"
+          ]
+        },
+        {
+          "name": "goose_dao_asset",
+          "docs": [
+            "On subsequent feeds (share_weight > 0), this can be any account (e.g. SystemProgram)."
+          ]
+        },
+        {
+          "name": "user_bananas_account",
+          "docs": [
+            "User's $BANANAS token account (will be burned from)"
+          ],
+          "writable": true
+        },
+        {
+          "name": "bananas_mint",
+          "docs": [
+            "$BANANAS mint (for burn CPI)"
+          ],
+          "writable": true
+        },
+        {
+          "name": "monke_burn",
+          "docs": [
+            "MonkeBurn PDA — created on first feed, incremented on subsequent feeds"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  110,
+                  107,
+                  101,
+                  95,
+                  98,
+                  117,
+                  114,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "goose_nft_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "feed_monke",
       "docs": [
         "Feed your monke — burn 1M $BANANAS, stack weight on an SMB Gen2 NFT.",
@@ -1235,6 +1358,21 @@
       "code": 6017,
       "name": "InvalidTokenAccount",
       "msg": "Invalid token account owner"
+    },
+    {
+      "code": 6018,
+      "name": "GooseDaoMembershipRequired",
+      "msg": "Wallet does not hold a GooseDAO Core NFT (required on first feed)"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidGooseCollection",
+      "msg": "Pixel goose NFT is not from the gooseswtf collection"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidCoreAsset",
+      "msg": "Invalid Metaplex Core asset account"
     }
   ],
   "types": [

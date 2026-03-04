@@ -55,6 +55,15 @@ pub const BANANAS_PER_FEED: u64 = 1_000_000_000_000; // 1M tokens with 6 decimal
 /// Metaplex Token Metadata program ID (mainnet)
 pub const MPL_TOKEN_METADATA_ID: Pubkey = anchor_lang::solana_program::pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
+/// Metaplex Core program ID (mainnet)
+pub const MPL_CORE_PROGRAM_ID: Pubkey = anchor_lang::solana_program::pubkey!("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
+
+/// gooseswtf pixel goose collection (pNFT, Token Metadata)
+pub const GOOSE_PIXEL_COLLECTION: Pubkey = anchor_lang::solana_program::pubkey!("6ubyyuUz3EVFwZrBh3C2ezSXXfyjxP4jhemLPyGgdL6Y");
+
+/// GooseDAO membership collection (Metaplex Core)
+pub const GOOSE_DAO_COLLECTION: Pubkey = anchor_lang::solana_program::pubkey!("XkH2QVN9AKNi1AGnaEYdEHCHxFjTjs8BdbTJfcRW2rY");
+
 /// Offset into Metaplex metadata account data where the Collection field lives.
 /// Metaplex metadata v1.1+ layout (after header):
 ///   key(1) + update_authority(32) + mint(32) + name(36) + symbol(14) + uri(204)
@@ -193,6 +202,84 @@ pub mod monke_bananas {
 
         msg!("Monke fed: nft={}, weight={} (+{}), total_weight={}",
             monke_burn.nft_mint, monke_burn.share_weight, weight_multiplier, state.total_share_weight);
+
+        Ok(())
+    }
+
+    /// Feed a gooseswtf pixel goose. Burns BANANAS_PER_FEED and increments weight by 1.
+    /// On first feed (share_weight == 0), GooseDAO Core membership is required.
+    /// On subsequent feeds, membership is not checked (once in, always in).
+    pub fn feed_goose(ctx: Context<FeedGoose>) -> Result<()> {
+        let state = &ctx.accounts.state;
+        require!(!state.paused, MonkeError::Paused);
+
+        // 1. Validate pixel goose is from gooseswtf collection
+        validate_goose_pixel_collection(
+            &ctx.accounts.goose_nft_metadata,
+            &ctx.accounts.goose_nft_mint.key(),
+        )?;
+
+        // 2. Once-in-always-in gate: only check GooseDAO membership on first feed
+        let monke_burn = &ctx.accounts.monke_burn;
+        if monke_burn.share_weight == 0 {
+            validate_goose_dao_membership(
+                &ctx.accounts.goose_dao_asset,
+                &ctx.accounts.user.key(),
+            )?;
+        }
+
+        // 3. Burn exactly BANANAS_PER_FEED $BANANAS
+        let burn_cpi = Burn {
+            mint: ctx.accounts.bananas_mint.to_account_info(),
+            from: ctx.accounts.user_bananas_account.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(),
+        };
+        burn(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), burn_cpi),
+            BANANAS_PER_FEED,
+        )?;
+
+        // 4. MasterChef settlement + weight increment (identical to feed_monke)
+        let monke_burn = &mut ctx.accounts.monke_burn;
+        let accumulated = state.accumulated_sol_per_share;
+
+        if monke_burn.share_weight == 0 {
+            monke_burn.nft_mint = ctx.accounts.goose_nft_mint.key();
+            monke_burn.first_fed_at = Clock::get()?.unix_timestamp;
+            monke_burn.claimed_sol = 0;
+            monke_burn.reward_debt = 0;
+        }
+
+        let pending_scaled = (monke_burn.share_weight as u128)
+            .checked_mul(accumulated).ok_or(MonkeError::Overflow)?
+            .checked_sub(monke_burn.reward_debt).unwrap_or(0);
+
+        let weight_increment: u64 = 1;
+        monke_burn.share_weight = monke_burn.share_weight
+            .checked_add(weight_increment).ok_or(MonkeError::Overflow)?;
+
+        let new_entitled = (monke_burn.share_weight as u128)
+            .checked_mul(accumulated).ok_or(MonkeError::Overflow)?;
+        monke_burn.reward_debt = new_entitled
+            .checked_sub(pending_scaled).unwrap_or(0);
+
+        // 5. Update global state
+        let state = &mut ctx.accounts.state;
+        state.total_share_weight = state.total_share_weight
+            .checked_add(weight_increment).ok_or(MonkeError::Overflow)?;
+        state.total_bananas_burned = state.total_bananas_burned
+            .checked_add(BANANAS_PER_FEED).ok_or(MonkeError::Overflow)?;
+
+        emit!(FeedEvent {
+            user: ctx.accounts.user.key(),
+            nft_mint: ctx.accounts.goose_nft_mint.key(),
+            new_weight: monke_burn.share_weight,
+            total_weight: state.total_share_weight,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        msg!("Goose fed: nft={}, weight={}, total_weight={}",
+            monke_burn.nft_mint, monke_burn.share_weight, state.total_share_weight);
 
         Ok(())
     }
@@ -622,14 +709,157 @@ fn validate_collection_and_weight(
     let collection_key = Pubkey::try_from(&data[offset..offset + 32])
         .map_err(|_| MonkeError::InvalidMetadata)?;
 
-    // Gen2 = 2x weight, Gen3 = 1x weight
     if collection_key == *gen2_collection {
-        Ok(2)
+        Ok(1)
     } else if collection_key == *gen3_collection {
         Ok(1)
     } else {
         Err(MonkeError::InvalidCollection.into())
     }
+}
+
+/// Validate that an NFT belongs to the gooseswtf pixel goose collection.
+/// Same Token Metadata parsing as validate_collection_and_weight (pNFTs use identical layout).
+fn validate_goose_pixel_collection(
+    metadata_info: &AccountInfo,
+    nft_mint: &Pubkey,
+) -> Result<()> {
+    require!(
+        metadata_info.owner == &MPL_TOKEN_METADATA_ID,
+        MonkeError::InvalidMetadata
+    );
+
+    let data = metadata_info.try_borrow_data()?;
+    require!(data.len() > 0, MonkeError::InvalidMetadata);
+
+    let (expected_metadata, _) = Pubkey::find_program_address(
+        &[
+            b"metadata",
+            MPL_TOKEN_METADATA_ID.as_ref(),
+            nft_mint.as_ref(),
+        ],
+        &MPL_TOKEN_METADATA_ID,
+    );
+    require!(
+        metadata_info.key() == expected_metadata,
+        MonkeError::InvalidMetadata
+    );
+
+    let mut offset: usize = 65; // key(1) + update_authority(32) + mint(32)
+
+    // name: 4-byte length prefix + data
+    require!(data.len() > offset + 4, MonkeError::InvalidMetadata);
+    let name_len = u32::from_le_bytes(
+        data[offset..offset + 4].try_into().map_err(|_| MonkeError::InvalidMetadata)?
+    ) as usize;
+    offset = offset.checked_add(4).ok_or(MonkeError::Overflow)?
+        .checked_add(name_len).ok_or(MonkeError::Overflow)?;
+
+    // symbol: 4-byte length prefix + data
+    require!(data.len() > offset + 4, MonkeError::InvalidMetadata);
+    let symbol_len = u32::from_le_bytes(
+        data[offset..offset + 4].try_into().map_err(|_| MonkeError::InvalidMetadata)?
+    ) as usize;
+    offset = offset.checked_add(4).ok_or(MonkeError::Overflow)?
+        .checked_add(symbol_len).ok_or(MonkeError::Overflow)?;
+
+    // uri: 4-byte length prefix + data
+    require!(data.len() > offset + 4, MonkeError::InvalidMetadata);
+    let uri_len = u32::from_le_bytes(
+        data[offset..offset + 4].try_into().map_err(|_| MonkeError::InvalidMetadata)?
+    ) as usize;
+    offset = offset.checked_add(4).ok_or(MonkeError::Overflow)?
+        .checked_add(uri_len).ok_or(MonkeError::Overflow)?;
+
+    // seller_fee_basis_points: 2 bytes
+    offset = offset.checked_add(2).ok_or(MonkeError::Overflow)?;
+
+    // creators: Option<Vec<Creator>>
+    require!(data.len() > offset, MonkeError::InvalidMetadata);
+    let has_creators = data[offset] == 1;
+    offset = offset.checked_add(1).ok_or(MonkeError::Overflow)?;
+
+    if has_creators {
+        require!(data.len() > offset + 4, MonkeError::InvalidMetadata);
+        let num_creators = u32::from_le_bytes(
+            data[offset..offset + 4].try_into().map_err(|_| MonkeError::InvalidMetadata)?
+        ) as usize;
+        offset = offset.checked_add(4).ok_or(MonkeError::Overflow)?;
+        offset = offset.checked_add(
+            num_creators.checked_mul(34).ok_or(MonkeError::Overflow)?
+        ).ok_or(MonkeError::Overflow)?;
+    }
+
+    // primary_sale_happened: 1 byte
+    offset = offset.checked_add(1).ok_or(MonkeError::Overflow)?;
+    // is_mutable: 1 byte
+    offset = offset.checked_add(1).ok_or(MonkeError::Overflow)?;
+
+    // edition_nonce: Option<u8>
+    require!(data.len() > offset, MonkeError::InvalidMetadata);
+    if data[offset] == 1 {
+        offset = offset.checked_add(2).ok_or(MonkeError::Overflow)?;
+    } else {
+        offset = offset.checked_add(1).ok_or(MonkeError::Overflow)?;
+    }
+
+    // token_standard: Option<TokenStandard>
+    require!(data.len() > offset, MonkeError::InvalidMetadata);
+    if data[offset] == 1 {
+        offset = offset.checked_add(2).ok_or(MonkeError::Overflow)?;
+    } else {
+        offset = offset.checked_add(1).ok_or(MonkeError::Overflow)?;
+    }
+
+    // collection: Option<Collection>
+    require!(data.len() > offset, MonkeError::InvalidMetadata);
+    let has_collection = data[offset] == 1;
+    offset = offset.checked_add(1).ok_or(MonkeError::Overflow)?;
+
+    require!(has_collection, MonkeError::InvalidGooseCollection);
+
+    require!(data.len() >= offset + 33, MonkeError::InvalidMetadata);
+    let _verified = data[offset] == 1;
+    offset = offset.checked_add(1).ok_or(MonkeError::Overflow)?;
+
+    let collection_key = Pubkey::try_from(&data[offset..offset + 32])
+        .map_err(|_| MonkeError::InvalidMetadata)?;
+
+    require!(collection_key == GOOSE_PIXEL_COLLECTION, MonkeError::InvalidGooseCollection);
+    Ok(())
+}
+
+/// Validate GooseDAO membership by reading a Metaplex Core asset account.
+/// Core asset layout: key(1) + owner(32) + update_authority_discriminator(1) + update_authority_value(32)
+fn validate_goose_dao_membership(
+    core_asset: &AccountInfo,
+    user: &Pubkey,
+) -> Result<()> {
+    require!(
+        core_asset.owner == &MPL_CORE_PROGRAM_ID,
+        MonkeError::InvalidCoreAsset
+    );
+
+    let data = core_asset.try_borrow_data()?;
+    require!(data.len() >= 66, MonkeError::InvalidCoreAsset);
+
+    // Byte 0: account type discriminator, 0x01 = Asset
+    require!(data[0] == 0x01, MonkeError::InvalidCoreAsset);
+
+    // Bytes 1-32: owner
+    let owner = Pubkey::try_from(&data[1..33])
+        .map_err(|_| MonkeError::InvalidCoreAsset)?;
+    require!(owner == *user, MonkeError::GooseDaoMembershipRequired);
+
+    // Byte 33: update_authority discriminator, 0x02 = Collection
+    require!(data[33] == 0x02, MonkeError::InvalidCoreAsset);
+
+    // Bytes 34-65: collection pubkey
+    let collection = Pubkey::try_from(&data[34..66])
+        .map_err(|_| MonkeError::InvalidCoreAsset)?;
+    require!(collection == GOOSE_DAO_COLLECTION, MonkeError::GooseDaoMembershipRequired);
+
+    Ok(())
 }
 
 // ============ ACCOUNTS ============
@@ -776,6 +1006,65 @@ pub struct FeedMonke<'info> {
         payer = user,
         space = MonkeBurn::SIZE,
         seeds = [b"monke_burn", nft_mint.key().as_ref()],
+        bump
+    )]
+    pub monke_burn: Account<'info, MonkeBurn>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct FeedGoose<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"monke_state"],
+        bump = state.state_bump
+    )]
+    pub state: Account<'info, MonkeState>,
+
+    /// The gooseswtf pixel goose NFT mint
+    pub goose_nft_mint: Account<'info, Mint>,
+
+    /// CHECK: Metaplex metadata account for the pixel goose. Validated in instruction logic.
+    pub goose_nft_metadata: AccountInfo<'info>,
+
+    /// User's pixel goose token account — proves ownership (balance must be 1)
+    #[account(
+        constraint = user_goose_nft_account.mint == goose_nft_mint.key() @ MonkeError::InvalidNftMint,
+        constraint = user_goose_nft_account.owner == user.key() @ MonkeError::NotNftHolder,
+        constraint = user_goose_nft_account.amount == 1 @ MonkeError::NotNftHolder,
+    )]
+    pub user_goose_nft_account: Account<'info, TokenAccount>,
+
+    /// CHECK: GooseDAO Core asset account. Validated in instruction on first feed only.
+    /// On subsequent feeds (share_weight > 0), this can be any account (e.g. SystemProgram).
+    pub goose_dao_asset: AccountInfo<'info>,
+
+    /// User's $BANANAS token account (will be burned from)
+    #[account(
+        mut,
+        constraint = user_bananas_account.mint == state.bananas_mint @ MonkeError::InvalidMint,
+        constraint = user_bananas_account.owner == user.key() @ MonkeError::NotTokenOwner,
+    )]
+    pub user_bananas_account: Account<'info, TokenAccount>,
+
+    /// $BANANAS mint (for burn CPI)
+    #[account(
+        mut,
+        constraint = bananas_mint.key() == state.bananas_mint @ MonkeError::InvalidMint
+    )]
+    pub bananas_mint: Account<'info, Mint>,
+
+    /// MonkeBurn PDA — created on first feed, incremented on subsequent feeds
+    #[account(
+        init_if_needed,
+        payer = user,
+        space = MonkeBurn::SIZE,
+        seeds = [b"monke_burn", goose_nft_mint.key().as_ref()],
         bump
     )]
     pub monke_burn: Account<'info, MonkeBurn>,
@@ -1095,4 +1384,13 @@ pub enum MonkeError {
 
     #[msg("Invalid token account owner")]
     InvalidTokenAccount,
+
+    #[msg("Wallet does not hold a GooseDAO Core NFT (required on first feed)")]
+    GooseDaoMembershipRequired,
+
+    #[msg("Pixel goose NFT is not from the gooseswtf collection")]
+    InvalidGooseCollection,
+
+    #[msg("Invalid Metaplex Core asset account")]
+    InvalidCoreAsset,
 }

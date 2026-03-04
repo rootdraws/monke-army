@@ -26,6 +26,7 @@ import {
 } from '../src/generated/bin-farm/index.js';
 import {
   getFeedMonkeInstructionAsync,
+  getFeedGooseInstructionAsync,
   getClaimInstructionAsync,
   getClaimPeggedInstructionAsync,
   getDepositSolInstructionAsync,
@@ -48,6 +49,9 @@ const CONFIG = {
   SMB_COLLECTION: 'SMBtHCCC6RYRutFEPb4gZqeBLUZbMNhRKaMKZZLHi7W',
   BIRDEYE_API_KEY: '',
   DEFAULT_POOL: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
+  GOOSE_PIXEL_COLLECTION: '6ubyyuUz3EVFwZrBh3C2ezSXXfyjxP4jhemLPyGgdL6Y',
+  GOOSE_DAO_COLLECTION: 'XkH2QVN9AKNi1AGnaEYdEHCHxFjTjs8BdbTJfcRW2rY',
+  MPL_CORE_PROGRAM_ID: 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d',
   DEBUG: false,
 };
 
@@ -2403,7 +2407,7 @@ function renderCarouselFrame(nfts, idx) {
   const claimLabel = nft.pendingSol > 0n ? `${(Number(nft.pendingSol) / 1e9).toFixed(4)} ${rewardTk}` : '';
   frame.innerHTML = `
     <img src="${escapeHtml(nft.image || '')}" alt="${escapeHtml(nft.name || 'monke')}" loading="eager" fetchpriority="high" decoding="async" onerror="this.style.display='none'">
-    <span class="nft-gen-tag ${nft.gen === 2 ? 'gen2' : 'gen3'}">${nft.gen === 2 ? 'g2' : 'g3'}</span>
+    <span class="nft-gen-tag ${nft.gen === 'goose' ? 'goose' : nft.gen === 2 ? 'gen2' : 'gen3'}">${nft.gen === 'goose' ? 'goose' : nft.gen === 2 ? 'g2' : 'g3'}</span>
     ${weightLabel || claimLabel ? `<span class="nft-burn-info">${weightLabel}${weightLabel && claimLabel ? ' · ' : ''}${claimLabel}</span>` : ''}`;
 
   if (counter) counter.textContent = nfts.length > 1 ? `${idx + 1} / ${nfts.length}` : '';
@@ -2505,17 +2509,26 @@ async function renderMonkeList() {
     return;
   }
 
-  container.innerHTML = '<div class="empty-state">scanning for SMB monkes...</div>';
+  container.innerHTML = '<div class="empty-state">scanning...</div>';
   if (frame) frame.innerHTML = '<div class="empty-state" style="padding:20px;">scanning...</div>';
   hideCarouselNav();
 
-  const nfts = await fetchSMBNfts();
+  let nfts = await fetchSMBNfts();
   await enrichNftsWithBurnData(nfts);
+
+  // Once-in-always-in: filter out gooseswtf that have never been fed AND have no GooseDAO membership
+  nfts = nfts.filter(nft => {
+    if (nft.gen !== 'goose') return true;
+    if (nft.gooseDaoAsset) return true;      // has current GooseDAO membership
+    if (nft.hasBurn) return true;             // already fed before (once in, always in)
+    return false;
+  });
+
   state.monkeNfts = nfts;
 
   if (nfts.length === 0) {
-    container.innerHTML = '<div class="empty-state">no SMB Gen2/Gen3 NFTs found — <a href="https://magiceden.us/marketplace/solana_monkey_business" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">buy Gen2</a> · <a href="https://magiceden.us/marketplace/smb_gen3" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">buy Gen3</a></div>';
-    if (frame) frame.innerHTML = '<div class="empty-state" style="padding:20px;">no monkes</div>';
+    container.innerHTML = '<div class="empty-state">no eligible NFTs found — <a href="https://magiceden.us/marketplace/solana_monkey_business" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">buy Gen2</a> · <a href="https://magiceden.us/marketplace/smb_gen3" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">buy Gen3</a> · <a href="https://magiceden.io/marketplace/gooseswtf" target="_blank" rel="noopener" style="color:var(--bananas);text-decoration:none;">gooseswtf</a></div>';
+    if (frame) frame.innerHTML = '<div class="carousel-filler"><img src="/filler.svg" alt="no eligible NFTs" style="max-width:100%;border-radius:12px;opacity:0.6;" /></div>';
     hideCarouselNav();
     return;
   }
@@ -2545,7 +2558,7 @@ async function renderMonkeList() {
     <div class="monke-row${i === 0 ? ' selected' : ''}" data-mint="${escapeHtml(nft.mint)}" data-idx="${i}">
       <span class="row-chevron">&#9654;</span>
       <span>${escapeHtml(nft.name || nft.mint.slice(0, 8) + '...')}</span>
-      <span class="gen-badge ${nft.gen === 2 ? 'gen2' : 'gen3'}">gen${nft.gen}</span>
+      <span class="gen-badge ${nft.gen === 'goose' ? 'goose' : nft.gen === 2 ? 'gen2' : 'gen3'}">${nft.gen === 'goose' ? 'goose' : 'gen' + nft.gen}</span>
       <span>${nft.weight || 0}</span>
       <span class="claimable">${nft.claimable || '0'} ${CONFIG.PEGGED_MINT ? '$PEGGED' : 'SOL'}</span>
       <button class="action-btn-sm" data-mint="${escapeHtml(nft.mint)}" data-action="claim" ${nft.hasBurn && nft.pendingSol > 0n ? '' : 'disabled style="opacity:0.25;cursor:default;"'}>claim</button>
@@ -2577,7 +2590,10 @@ function selectMonke(nft) {
   const infoEl = document.getElementById('nftSelectedInfo');
   if (infoEl) infoEl.style.display = '';
   if (nameEl) nameEl.textContent = nft.name || nft.mint.slice(0, 12) + '...';
-  if (genEl) genEl.textContent = 'gen' + nft.gen + (nft.gen === 2 ? ' (2x weight)' : ' (1x weight)');
+  if (genEl) {
+    const label = nft.gen === 'goose' ? 'goose' : 'gen' + nft.gen;
+    genEl.textContent = label + ' (1x weight)';
+  }
   state.selectedMonkeMint = nft.mint;
   highlightMonkeRow(nft.mint);
 }
@@ -2613,14 +2629,29 @@ async function fetchSMBNfts() {
 
     const gen2Collection = CONFIG.SMB_COLLECTION;
     const gen3Collection = CONFIG.SMB_GEN3_COLLECTION;
+    const goosePixelCollection = CONFIG.GOOSE_PIXEL_COLLECTION;
+    const gooseDaoCollection = CONFIG.GOOSE_DAO_COLLECTION;
     const monkes = [];
+    const gooseCandidates = [];
+
+    // Detect GooseDAO Core membership from the same DAS response (zero extra RPC calls)
+    let gooseDaoAssetId = null;
+    for (const item of items) {
+      const collection = item.grouping?.find(g => g.group_key === 'collection')?.group_value;
+      if (collection === gooseDaoCollection) {
+        gooseDaoAssetId = item.id;
+        break;
+      }
+    }
 
     for (const item of items) {
       const collection = item.grouping?.find(g => g.group_key === 'collection')?.group_value;
       let gen = 0;
+      let isGoose = false;
       if (collection === gen2Collection) gen = 2;
       else if (collection === gen3Collection) gen = 3;
-      if (gen === 0) continue;
+      else if (collection === goosePixelCollection) isGoose = true;
+      if (gen === 0 && !isGoose) continue;
 
       let image = item.content?.links?.image || '';
       if (!image) {
@@ -2634,16 +2665,27 @@ async function fetchSMBNfts() {
         if (!image && files.length > 0) image = files[0].cdn_uri || files[0].uri || '';
       }
 
-      monkes.push({
+      const nftEntry = {
         mint: item.id,
         name: item.content?.metadata?.name || '',
         image,
         json_uri: item.content?.json_uri || '',
-        gen,
+        gen: isGoose ? 'goose' : gen,
         weight: 0,
         claimable: '0',
-      });
+        gooseDaoAsset: isGoose ? gooseDaoAssetId : null,
+      };
+
+      if (isGoose) {
+        gooseCandidates.push(nftEntry);
+      } else {
+        monkes.push(nftEntry);
+      }
     }
+
+    // Include goose candidates that either have GooseDAO membership or will be filtered
+    // after enrichNftsWithBurnData (once-in-always-in: already-fed geese kept regardless)
+    monkes.push(...gooseCandidates);
 
     // Resolve missing images from off-chain JSON metadata
     const needsResolve = monkes.filter(m => !m.image && m.json_uri);
@@ -2771,6 +2813,53 @@ async function handleFeedMonke(nftMintStr) {
     renderMonkeList();
   } catch (err) {
     console.error('[monke] feed_monke failed:', err);
+    showToast('Feed failed: ' + (err?.message || err), 'error');
+  }
+}
+
+async function handleFeedGoose(nftMintStr) {
+  if (!state.connected) { showToast('Connect wallet first', 'error'); return; }
+  const conn = state.connection;
+  const user = state.publicKey;
+  const gooseNftMint = new solanaWeb3.PublicKey(nftMintStr);
+  const bananasMint = new solanaWeb3.PublicKey(CONFIG.BANANAS_MINT);
+
+  const nftData = (state.monkeNfts || []).find(n => n.mint === nftMintStr);
+  // Use GooseDAO Core asset if available, otherwise SystemProgram as placeholder (already-fed geese)
+  const gooseDaoAssetStr = nftData?.gooseDaoAsset || '11111111111111111111111111111111';
+
+  try {
+    const [metadataPDA] = getMetadataPDA(gooseNftMint);
+    const userGooseNftAccount = getAssociatedTokenAddressSync(gooseNftMint, user);
+    const userBananasAccount = getAssociatedTokenAddressSync(bananasMint, user);
+
+    const tx = new solanaWeb3.Transaction();
+    tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
+    tx.add(makeComputeUnitPriceIx(DEFAULT_PRIORITY_MICROLAMPORTS));
+    const feedIx = await getFeedGooseInstructionAsync({
+      user: asSigner(user),
+      gooseNftMint: address(gooseNftMint.toBase58()),
+      gooseNftMetadata: address(metadataPDA.toBase58()),
+      userGooseNftAccount: address(userGooseNftAccount.toBase58()),
+      gooseDaoAsset: address(gooseDaoAssetStr),
+      userBananasAccount: address(userBananasAccount.toBase58()),
+      bananasMint: address(bananasMint.toBase58()),
+    });
+    tx.add(kitIxToWeb3(feedIx));
+
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.lastValidBlockHeight = lastValidBlockHeight;
+    tx.feePayer = user;
+
+    showToast('Approve in wallet...', 'info');
+    const sig = await walletSendTransaction(tx);
+    showToast('Confirming burn...', 'info');
+    await confirmAndCheck(conn, sig, blockhash, lastValidBlockHeight);
+    showToast('1M $BANANAS burned to your Goose!', 'success');
+    renderMonkeList();
+  } catch (err) {
+    console.error('[monke] feed_goose failed:', err);
     showToast('Feed failed: ' + (err?.message || err), 'error');
   }
 }
@@ -3663,8 +3752,10 @@ async function init() {
 
   // Rank: feed + claim
   document.getElementById('feedMonkeBtn')?.addEventListener('click', () => {
-    if (state.selectedMonkeMint) handleFeedMonke(state.selectedMonkeMint);
-    else showToast('Select a monke first', 'error');
+    if (!state.selectedMonkeMint) { showToast('Select a monke first', 'error'); return; }
+    const nft = (state.monkeNfts || []).find(n => n.mint === state.selectedMonkeMint);
+    if (nft && nft.gen === 'goose') handleFeedGoose(state.selectedMonkeMint);
+    else handleFeedMonke(state.selectedMonkeMint);
   });
   document.getElementById('claimAllBtn')?.addEventListener('click', handleClaimAll);
 
