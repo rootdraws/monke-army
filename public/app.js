@@ -2019,12 +2019,9 @@ async function createPosition() {
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
-    await preSimulate(tx);
+    tx.partialSign(meteoraPositionKeypair);
     showToast('Approve in wallet...', 'info');
-    const provider = window.phantom?.solana || window.solana;
-    const signedTx = await provider.signTransaction(tx);
-    signedTx.partialSign(meteoraPositionKeypair);
-    const sig = await conn.sendRawTransaction(signedTx.serialize());
+    const sig = await walletSendTransaction(tx);
     showToast('Confirming...', 'info');
     await confirmAndCheck(conn, sig, blockhash, lastValidBlockHeight);
 
