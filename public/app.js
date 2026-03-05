@@ -120,9 +120,8 @@ function asSigner(pubkeyOrAddress) {
   };
 }
 
-/** Pre-simulate with sigVerify: false to catch failures before wallet prompt. */
 async function preSimulate(tx) {
-  const sim = await state.connection.simulateTransaction(tx);
+  const sim = await state.connection.simulateTransaction(tx, { sigVerify: false });
   if (sim.value.err) {
     console.error('[monke] pre-sim failed:', sim.value.err, sim.value.logs?.join('\n'));
     throw new Error('Transaction simulation failed: ' + JSON.stringify(sim.value.err));
@@ -2006,8 +2005,8 @@ async function createPosition() {
     tx.lastValidBlockHeight = lastValidBlockHeight;
     tx.feePayer = user;
 
-    tx.partialSign(meteoraPositionKeypair);
     await preSimulate(tx);
+    tx.partialSign(meteoraPositionKeypair);
     showToast('Approve in wallet...', 'info');
     const openResult = await phantomSDK.solana.signAndSendTransaction(tx);
     const sig = openResult?.signature || openResult?.hash || openResult;
