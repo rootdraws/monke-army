@@ -2246,18 +2246,24 @@ async function closePosition(index) {
       if (bmIdx >= 0) closeWeb3Ix.keys[bmIdx].isWritable = true;
     }
 
-    const tx = new solanaWeb3.Transaction();
-    tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
-    tx.add(makeComputeUnitPriceIx(DEFAULT_PRIORITY_MICROLAMPORTS));
-    tx.add(closeWeb3Ix);
-
+    const altAccount = await getPoolALT();
+    const ixs = [
+      solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+      makeComputeUnitPriceIx(DEFAULT_PRIORITY_MICROLAMPORTS),
+      closeWeb3Ix,
+    ];
     const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
-    tx.recentBlockhash = blockhash;
-    tx.lastValidBlockHeight = lastValidBlockHeight;
-    tx.feePayer = user;
+    const messageV0 = new solanaWeb3.TransactionMessage({
+      payerKey: user,
+      recentBlockhash: blockhash,
+      instructions: ixs,
+    }).compileToV0Message([altAccount]);
+    const vtx = new solanaWeb3.VersionedTransaction(messageV0);
 
     showToast('Approve in wallet...', 'info');
-    const sig = await walletSendTransaction(tx);
+    const result = await phantomSDK.solana.signAndSendTransaction(vtx);
+    const sig = result?.signature || result?.hash || (typeof result === 'string' ? result : undefined);
+    if (!sig) throw new Error('Wallet returned no transaction signature');
     showToast('Confirming...', 'info');
     await confirmAndCheck(conn, sig, blockhash, lastValidBlockHeight);
 
@@ -2334,18 +2340,24 @@ async function closePositionDirect(pos) {
     if (bmIdx >= 0) ucWeb3Ix.keys[bmIdx].isWritable = true;
   }
 
-  const tx = new solanaWeb3.Transaction();
-  tx.add(solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
-  tx.add(makeComputeUnitPriceIx(DEFAULT_PRIORITY_MICROLAMPORTS));
-  tx.add(ucWeb3Ix);
-
+  const altAccount = await getPoolALT();
+  const ixs = [
+    solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+    makeComputeUnitPriceIx(DEFAULT_PRIORITY_MICROLAMPORTS),
+    ucWeb3Ix,
+  ];
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
-  tx.recentBlockhash = blockhash;
-  tx.lastValidBlockHeight = lastValidBlockHeight;
-  tx.feePayer = user;
+  const messageV0 = new solanaWeb3.TransactionMessage({
+    payerKey: user,
+    recentBlockhash: blockhash,
+    instructions: ixs,
+  }).compileToV0Message([altAccount]);
+  const vtx = new solanaWeb3.VersionedTransaction(messageV0);
 
   showToast('Approve in wallet...', 'info');
-  const sig = await walletSendTransaction(tx);
+  const result = await phantomSDK.solana.signAndSendTransaction(vtx);
+  const sig = result?.signature || result?.hash || (typeof result === 'string' ? result : undefined);
+  if (!sig) throw new Error('Wallet returned no transaction signature');
   showToast('Confirming...', 'info');
   await confirmAndCheck(conn, sig, blockhash, lastValidBlockHeight);
   if (CONFIG.DEBUG) console.log(`[monke] Close tx: ${sig}`);
