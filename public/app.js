@@ -982,6 +982,7 @@ async function connectWallet() {
     showToast('Connected', 'success');
     refreshPositionsList();
     loadBinVizData();
+    if (state.currentPage === 1) renderPositionsPage();
     renderMonkeList();
     updateFee();
     loadAddressBook();
